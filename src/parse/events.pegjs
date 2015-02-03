@@ -21,7 +21,7 @@ stream
 class = "." c:value ":" { return { type:'class', value: c } }
 id = "#" id: value ":" { return { type:'id', value: id } }
 
-eventType = e: "mousedown" / "mouseup" / "click" / "dblclick" / "wheel" / "keydown" / "keypress" / "keyup" / "mousewheel" / "mousemove" / "mouseout" / "mouseover" / "mouseenter"
+eventType = e: "mousedown" / "mouseup" / "click" / "dblclick" / "wheel" / "keydown" / "keypress" / "keyup" / "mousewheel" / "mousemove" / "mouseout" / "mouseover" / "mouseenter" / "touchstart" / "touchmove" / "touchend"
 
 filter = "[" sep a:accessor field:value sep o:op sep v:value sep "]" { return a + field + o + v }
 accessor = "e." / "i." / "d." / "p."
