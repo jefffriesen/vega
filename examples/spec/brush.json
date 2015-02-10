@@ -6,14 +6,14 @@
     {
       "name": "brush_start",
       "init": {"x": 0, "y": 0},
-      "streams": [{"type": "mousedown", "expr": "p"}]
+      "streams": [{"type": "mousedown,touchstart", "expr": "p"}]
     },
     {
       "name": "brush_end",
       "init": {"x": 0, "y": 0},
       "streams": [
-        {"type": "mousedown", "expr": "p"},
-        {"type": "[mousedown, mouseup] > mousemove", "expr": "p"}
+        {"type": "mousedown,touchstart", "expr": "p"},
+        {"type": "[mousedown, mouseup] > mousemove,touchmove", "expr": "p"}
       ]
     }
   ],
@@ -99,7 +99,7 @@
                   "yScale": {"scale": "y", "invert": true}
                 },
 
-                "scale": "c", 
+                "scale": "c",
                 "field": "species"
               },
               {"value": "grey"}
