@@ -6,12 +6,14 @@
     {
       "name": "clickedPt",
       "init": 0,
-      "streams": [{"type": "click", "expr": "d._id"}]
+      "streams": [{"type": "click", "expr": "d._id"},
+                  {"type": "touchend", "expr": "e.preventDefault(),d._id"}]
     },
     {
       "name": "shift",
       "init": false,
-      "streams": [{"type": "click", "expr": "e.shiftKey"}]
+      "streams": [{"type": "click", "expr": "e.shiftKey"},
+                  {"type": "touchend", "expr": "e.preventDefault(),i.class=='point'"}]
     }
   ],
 
@@ -82,6 +84,7 @@
       "from": {"data": "iris"},
       "properties": {
         "enter": {
+          "class": {"value": "point"},
           "x": {"scale": "x", "field": "sepalWidth"},
           "y": {"scale": "y", "field": "petalLength"},
           "fillOpacity": {"value": 0.5},
@@ -96,7 +99,7 @@
                   "id": {"field": "_id"}
                 },
 
-                "scale": "c", 
+                "scale": "c",
                 "field": "species"
               },
               {"value": "grey"}
