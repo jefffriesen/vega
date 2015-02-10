@@ -26,6 +26,6 @@ eventType = e: "mousedown" / "mouseup" / "click" / "dblclick" / "wheel" / "keydo
 filter = "[" sep a:accessor field:value sep o:op sep v:value sep "]" { return a + field + o + v }
 accessor = "e." / "i." / "d." / "p."
 op = "==" / "!=" / ">" / ">=" / "<" / "<="
-value = v:['"a-zA-Z0-9_-]+ { return v.join("") }
+value = v:['"a-zA-Z0-9_\.-]+ { return v.join("") }
 
 sep = [ \t\r\n]*
