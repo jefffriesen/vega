@@ -1,6 +1,6 @@
 define(function(require, exports, module) {
   var parseTransforms = require('./transforms'),
-      parseModify = require('../transforms/modify'),
+      parseModify = require('./modify'),
       util = require('../util/index'),
       load = require('../util/load'),
       read = require('../util/read');
@@ -40,7 +40,10 @@ define(function(require, exports, module) {
     if(d.values) ds.values(read(d.values, d.format));
     else if(d.source) {
       ds.source(d.source);
+
+      // The derived datasource will be pulsed by its src rather than the model.
       model.data(d.source).addListener(ds);
+      model.removeListener(ds._pipeline[0]); 
     }
 
     return ds;    

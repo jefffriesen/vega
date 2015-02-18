@@ -21,11 +21,10 @@ describe('Filter', function() {
       }] 
     }, function(model) {
       var ds = model.data('table'),
-          data, filtered, i, len;
+          data = ds.values(), 
+          filtered = values.filter(function(d) { return d.y > 45 }), 
+          i, len;
 
-      model.fire();
-      filtered = values.filter(function(d) { return d.y > 45 });
-      data = ds.values();
       expect(data.length).to.be.above(0).and.equal(filtered.length);
       for(i=0, len=data.length; i<len; ++i) expect(data[i].y).to.be.above(45);
 
@@ -44,21 +43,20 @@ describe('Filter', function() {
       }] 
     }, function(model) {
       var ds = model.data('table'),
-          data, filtered, i, len;
+          data = ds.values(), 
+          filtered = values.filter(function(d) { return d.y > 45 }), 
+          i, len;
 
-      model.fire();
-      filtered = values.filter(function(d) { return d.y > 45 });
-      data = ds.values();
       expect(data.length).to.be.above(0).and.equal(filtered.length);
       for(i=0, len=data.length; i<len; ++i) expect(data[i].y).to.be.above(45);
 
-      model.signal('above').value(15).fire();
+      model.graph.signal('above').value(15).fire();
       filtered = values.filter(function(d) { return d.y > 15 });
       data = ds.values();
       expect(data.length).to.be.above(0).and.equal(filtered.length);
       for(i=0, len=data.length; i<len; ++i) expect(data[i].y).to.be.above(15);
 
-      model.signal('above').value(30).fire();
+      model.graph.signal('above').value(30).fire();
       filtered = values.filter(function(d) { return d.y > 30 });
       data = ds.values();
       expect(data.length).to.be.above(0).and.equal(filtered.length);

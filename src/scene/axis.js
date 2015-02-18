@@ -1,6 +1,6 @@
 define(function(require, module, exports) {
   var config = require('../util/config'),
-      tpl = require('../core/tuple'),
+      tpl = require('../dataflow/tuple'),
       util = require('../util/index'),
       parseMark = require('../parse/mark');
 
@@ -426,7 +426,7 @@ define(function(require, module, exports) {
     domain.properties.update.path = {value: path};
   }
 
-  function vg_axisUpdate(stamp, item, group, trans, db, signals, predicates) {
+  function vg_axisUpdate(item, group, trans, db, signals, predicates) {
     var o = trans ? {} : item,
         offset = item.mark.def.offset,
         orient = item.mark.def.orient,

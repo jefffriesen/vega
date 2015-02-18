@@ -1,9 +1,11 @@
 var STATIC_SPECS = [
   "area",
   "bar",
+  "barley",
   "error",
   "grouped_bar",
   "lifelines",
+  "parallel_coords",
   "stocks",
   "weather"
 ];

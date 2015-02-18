@@ -21,61 +21,58 @@ describe('Sort', function() {
     "data": [{
       "name": "table",
       "values": values,
-      "transform": [{"type": "sort", "by": "y"}]
+      "transform": [{"type": "sort", "by": {"field": "y"}}]
     }]
   }
 
   it('should sort asc w/a single static fieldName', function(done) {
     parseSpec(spec, function(model) {
       var ds = model.data('table'),
-          data, i, len, d;
+          data = ds.values(), 
+          i, len, d;
 
-      model.fire();
-      data = ds.values();
       expect(data).to.have.length(20);
       for(i=1, len=data.length; i<len; ++i) {
         expect(data[i].y).to.be.at.least(data[i-1].y)
       }
 
       done();
-    }, viewFactory);
+    }, modelFactory);
   });
 
   it('should sort desc w/a single static fieldName', function(done) {
     var s = util.duplicate(spec);
-    s.data[0].transform[0].by = "-y";
+    s.data[0].transform[0].by.field = "-y";
 
     parseSpec(s, function(model) {
       var ds = model.data('table'),
-          data, i, len, d;
+          data = ds.values(), 
+          i, len, d;
 
-      model.fire();
-      data = ds.values();
       expect(data).to.have.length(20);
       for(i=1, len=data.length; i<len; ++i) {
         expect(data[i-1].y).to.be.at.least(data[i].y)
       }
 
       done();
-    }, viewFactory);
+    }, modelFactory);
   });
 
   it('should sort w/a single signal', function(done) {
     var s = util.duplicate(spec);
-    s.data[0].transform[0].by = "sortBy1";
+    s.data[0].transform[0].by = {"signal": "sortBy1"};
 
     parseSpec(s, function(model) {
       var ds = model.data('table'),
-          data, i, len, d;
+          data = ds.values(), 
+          i, len, d;
 
-      model.fire();
-      data = ds.values();
       expect(data).to.have.length(20);
       for(i=1, len=data.length; i<len; ++i) {
         expect(data[i].y).to.be.at.least(data[i-1].y)
       }
 
-      model.signal('sortBy1').value('-y').fire();
+      model.graph.signal('sortBy1').value('-y').fire();
       data = ds.values();
       expect(data).to.have.length(20);
       for(i=1, len=data.length; i<len; ++i) {
@@ -83,19 +80,18 @@ describe('Sort', function() {
       }
 
       done();
-    }, viewFactory);
+    }, modelFactory);
   }); 
 
   it('should sort w/multiple static fieldNames', function(done) {
     var s = util.duplicate(spec);
-    s.data[0].transform[0].by = ['-x', 'y'];
+    s.data[0].transform[0].by = [{"field": "-x"}, {"field": "y"}];
 
     parseSpec(s, function(model) {
       var ds = model.data('table'),
-          data, i, len, d;
+          data = ds.values(), 
+          i, len, d;
 
-      model.fire();
-      data = ds.values();
       expect(data).to.have.length(20);
       for(i=1, len=data.length; i<len; ++i) {
         expect(data[i-1].x).to.be.at.least(data[i].x);
@@ -105,19 +101,18 @@ describe('Sort', function() {
       }
 
       done();
-    }, viewFactory);
+    }, modelFactory);
   }); 
 
   it('should sort w/multiple signals', function(done) {
     var s = util.duplicate(spec);
-    s.data[0].transform[0].by = ['sortBy0', 'sortBy1'];
+    s.data[0].transform[0].by = [{"signal": "sortBy0"}, {"signal": "sortBy1"}];
 
     parseSpec(s, function(model) {
       var ds = model.data('table'),
-          data, i, len, d;
+          data = ds.values(), 
+          i, len, d;
 
-      model.fire();
-      data = ds.values();
       expect(data).to.have.length(20);
       for(i=1, len=data.length; i<len; ++i) {
         expect(data[i-1].x).to.be.at.least(data[i].x);
@@ -126,7 +121,7 @@ describe('Sort', function() {
         }
       }
 
-      model.signal('sortBy0').value('x').fire();
+      model.graph.signal('sortBy0').value('x').fire();
       data = ds.values();
       expect(data).to.have.length(20);
       for(i=1, len=data.length; i<len; ++i) {
@@ -136,7 +131,7 @@ describe('Sort', function() {
         }
       }
 
-      model.signal('sortBy1').value('-y').fire();
+      model.graph.signal('sortBy1').value('-y').fire();
       data = ds.values();
       expect(data).to.have.length(20);
       for(i=1, len=data.length; i<len; ++i) {
@@ -147,19 +142,18 @@ describe('Sort', function() {
       }
 
       done();
-    }, viewFactory);
+    }, modelFactory);
   });   
 
   it('should sort w/mixed fieldNames+signals', function(done) {
     var s = util.duplicate(spec);
-    s.data[0].transform[0].by = ['-x', 'sortBy1'];
+    s.data[0].transform[0].by = [{"field": "-x"}, {"signal": "sortBy1"}];
 
     parseSpec(s, function(model) {
       var ds = model.data('table'),
-          data, i, len, d;
+          data = ds.values(), 
+          i, len, d;
 
-      model.fire();
-      data = ds.values();
       expect(data).to.have.length(20);
       for(i=1, len=data.length; i<len; ++i) {
         expect(data[i-1].x).to.be.at.least(data[i].x);
@@ -168,7 +162,7 @@ describe('Sort', function() {
         }
       }
 
-      model.signal('sortBy1').value('-y').fire();
+      model.graph.signal('sortBy1').value('-y').fire();
       data = ds.values();
       expect(data).to.have.length(20);
       for(i=1, len=data.length; i<len; ++i) {
@@ -179,7 +173,7 @@ describe('Sort', function() {
       }
 
       done();
-    }, viewFactory);
+    }, modelFactory);
   });   
 
 });
