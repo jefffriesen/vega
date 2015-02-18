@@ -17,5 +17,6 @@ var INTERACTIVE_SPECS = [
   "panzoom_points",
   "panzoom_touch",
   "overview+detail",
+  "overview+detail_touch",
   "handles"
 ];
