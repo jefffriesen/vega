@@ -5,76 +5,89 @@
 
   "data": [
     {
-      "name": "points", 
+      "name": "points",
       "url": "data/points.json"
     }
   ],
 
   "signals": [
     {
-      "name": "xCoord",
+      "name": "zoomCenterX",
       "init": 0,
       "streams": [
-        {"type": "mousedown", "expr": "p.x"},
-        {"type": "[mousedown, mouseup] > mousemove", "expr": "p.x"}
+        {"type": "mousemove", "expr": "p"},
+        {"type": "touchmove[e.touches.length==2]", "expr": "(e.touches[0].pageX + e.touches[1].pageX) / 2"}
+      ]
+    },
+    {
+      "name": "zoomCenterY",
+      "init": 0,
+      "streams": [
+        {"type": "mousemove", "expr": "p"},
+        {"type": "touchmove[e.touches.length==2]", "expr": "(e.touches[0].pageY + e.touches[1].pageY) / 2"}
       ]
     },
     {
       "name": "xDelta",
       "init": 0,
       "streams": [
-        {"type": "mousedown", "expr": "0"},
-        {"type": "[mousedown, mouseup] > mousemove", "expr": "xCoord - p.x"}     
+        {"type": "mousedown,touchstart", "expr": "0"},
+        {"type": "[mousedown, mouseup] > mousemove,touchmove[e.touches.length==1]", "expr": "xCoord - p.x"}
       ]
     },
-
     {
-      "name": "yCoord",
+      "name": "xCoord",
       "init": 0,
       "streams": [
-        {"type": "mousedown", "expr": "p.y"},
-        {"type": "[mousedown, mouseup] > mousemove", "expr": "p.y"}
+        {"type": "mousedown,touchstart", "expr": "p.x"},
+        {"type": "[mousedown, mouseup] > mousemove,touchmove", "expr": "p.x"}
       ]
     },
     {
       "name": "yDelta",
       "init": 0,
       "streams": [
-        {"type": "mousedown", "expr": "0"},
-        {"type": "[mousedown, mouseup] > mousemove", "expr": "p.y - yCoord"}     
+        {"type": "mousedown,touchstart", "expr": "0"},
+        {"type": "[mousedown, mouseup] > mousemove,touchmove[e.touches.length==1]", "expr": "p.y - yCoord"}
       ]
     },
-
-
     {
-      "name": "xMin", 
-      "init": -1.6, 
+      "name": "yCoord",
+      "init": 0,
       "streams": [
-        {"type": "xDelta", "expr": "xMin + xDelta/200"},
+        {"type": "mousedown,touchstart", "expr": "p.y"},
+        {"type": "[mousedown, mouseup] > mousemove,touchmove", "expr": "p.y"}
+      ]
+    },
+    {
+      "name": "xMin",
+      "init": -1.6,
+      "streams": [
+        {"type": "xDelta", "expr": "xMin + (xMax-xMin)*xDelta/800"},
         {"type": "wheel", "expr": "e.wheelDelta < 0 ? xMin * 1.05 : xMin / 1.05"}
       ]
     },
     {
-      "name": "xMax", 
-      "init": 1.6, 
+      "name": "xMax",
+      "init": 1.6,
       "streams": [
-        {"type": "xDelta", "expr": "xMax + xDelta/200"},
+        {"type": "xDelta", "expr": "xMax + (xMax-xMin)*xDelta/800"},
         {"type": "wheel", "expr": "e.wheelDelta < 0 ? xMax * 1.05 : xMax / 1.05"}
       ]
     },
     {
-      "name": "yMin", 
-      "init": -1, 
+      "name": "yMin",
+      "init": -1,
       "streams": [
-        {"type": "yDelta", "expr": "yMin + yDelta/200"},
+        {"type": "yDelta", "expr": "yMin + (yMax-yMin)*yDelta/500"},
         {"type": "wheel", "expr": "e.wheelDelta < 0 ? yMin * 1.05 : yMin / 1.05"}
       ]
     },
     {
-      "name": "yMax", 
-      "init": 1, 
+      "name": "yMax",
+      "init": 1,
       "streams": [
-        {"type": "yDelta", "expr": "yMax + yDelta/200"},
+        {"type": "yDelta", "expr": "yMax + (yMax-yMin)*yDelta/500"},
         {"type": "wheel", "expr": "e.wheelDelta < 0 ? yMax * 1.05 : yMax / 1.05"}
       ]
     }

@@ -13,6 +13,7 @@ var INTERACTIVE_SPECS = [
   "brush",
   "brush_interactor",
   "panzoom_points",
+  "panzoom_touch",
   "overview+detail",
   "handles"
 ];
