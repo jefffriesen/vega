@@ -1,7 +1,7 @@
 define(function(require, exports, module) {
   var Node = require('../dataflow/Node'),
       Builder = require('./Builder'),
-      scalefn = require('./scale'),
+      Scale = require('./Scale'),
       parseAxes = require('../parse/axes'),
       util = require('../util/index'),
       C = require('../util/constants');
@@ -18,15 +18,13 @@ define(function(require, exports, module) {
 
   var proto = (GroupBuilder.prototype = new Builder());
 
-  proto.init = function(model, renderer, def, mark, parent, inheritFrom) {
+  proto.init = function(model, renderer, def, mark, parent, parent_id, inheritFrom) {
     var builder = this;
 
     this._scaler = new Node(model.graph);
 
     (def.scales||[]).forEach(function(s) { 
-      s = builder.scale(s.name, scalefn(model, s));
-      s.dependency(C.DATA).forEach(function(d) { model.data(d).addListener(builder); });
-      s.dependency(C.SIGNALS).forEach(function(s) { model.graph.signal(s).addListener(builder); });
+      s = builder.scale(s.name, new Scale(model, s, builder));
       builder._scaler.addListener(s);  // Scales should be computed after group is encoded
     });
 
@@ -39,6 +37,14 @@ define(function(require, exports, module) {
     this._recursor.dependency(C.SCALES, util.keys(scales));
 
     return Builder.prototype.init.apply(this, arguments);
+  };
+
+  proto.evaluate = function(input) {
+    var output = Builder.prototype.evaluate.apply(this, arguments),
+        builder = this;
+
+    output.add.forEach(function(group) { buildGroup.call(builder, output, group); });
+    return output;
   };
 
   proto._pipeline = function() {
@@ -58,12 +64,17 @@ define(function(require, exports, module) {
     return Builder.prototype.disconnect.call(this);
   };
 
-  proto.evaluate = function(input) {
-    var output = Builder.prototype.evaluate.apply(this, arguments),
-        builder = this;
+  proto.child = function(name, group_id) {
+    var children = this._children[group_id],
+        i = 0, len = children.length,
+        child;
 
-    output.add.forEach(function(group) { buildGroup.call(builder, output, group); });
-    return output;
+    for(; i<len; ++i) {
+      child = children[i];
+      if(child.type == C.MARK && child.builder._def.name == name) break;
+    }
+
+    return child.builder;
   };
 
   function recurse(input) {
@@ -126,20 +137,21 @@ define(function(require, exports, module) {
   function buildMarks(input, group) {
     util.debug(input, ["building marks", this._def.marks]);
     var marks = this._def.marks,
-        mark, inherit, i, len, m, b;
+        mark, from, inherit, i, len, m, b;
 
     for(i=0, len=marks.length; i<len; ++i) {
       mark = marks[i];
+      from = mark.from || {};
       inherit = "vg_"+group.datum._id;
       group.items[i] = {group: group};
       b = (mark.type === C.GROUP) ? new GroupBuilder() : new Builder();
-      b.init(this._model, this._renderer, mark, group.items[i], this, inherit);
+      b.init(this._model, this._renderer, mark, group.items[i], this, group._id, inherit);
 
       // Temporary connection to propagate initial pulse. 
       this._recursor.addListener(b);
       this._children[group._id].push({ 
         builder: b, 
-        from: ((mark.from||{}).data) || inherit, 
+        from: from.data || from.mark ? ("vg_" + group._id + "_" + from.mark) : inherit, 
         type: C.MARK 
       });
     }

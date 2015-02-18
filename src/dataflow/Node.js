@@ -25,6 +25,7 @@ define(function(require, exports, module) {
 
     this._isRouter = false; // Responsible for propagating tuples, cannot ever be skipped
     this._isCollector = false;  // Holds a materialized dataset, pulse to reflow
+    this._needsPrev = false; // Does the operator require tuples' previous values? 
     return this;
   };
 
@@ -51,7 +52,8 @@ define(function(require, exports, module) {
     if(deps === null) { // Clear dependencies of a certain type
       while(d.length > 0) d.pop();
     } else {
-      d.push.apply(d, util.array(deps));
+      if(!util.isArray(deps) && d.indexOf(deps) < 0) d.push(deps);
+      else d.push.apply(d, util.array(deps));
     }
     return this;
   };
@@ -65,6 +67,12 @@ define(function(require, exports, module) {
   proto.collector = function(bool) {
     if(!arguments.length) return this._isCollector;
     this._isCollector = !!bool;
+    return this;
+  };
+
+  proto.needsPrev = function(bool) {
+    if(!arguments.length) return this._needsPrev;
+    this._needsPrev = !!bool;
     return this;
   };
 

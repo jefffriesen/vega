@@ -1,4 +1,4 @@
-describe('Aggregate', function() {
+describe('Stats', function() {
 
   describe('Flat', function() {
     var values = [
@@ -14,20 +14,18 @@ describe('Aggregate', function() {
       {"x": 19, "y": 49}, {"x": 20, "y": 15}
     ];
 
-    function spec(stats) {
+    function spec(meas) {
       return { 
         "data": [{ 
           "name": "table", 
           "values": values,
-          "transform": [{"type": "aggregate", "on": "y", "stats": stats }]
+          "transform": [{"type": "stats", "on": "y", "measures": meas }]
         }] 
       };
     }
 
     it('should calculate count', function(done) {
       parseSpec(spec(['count']), function(model) {
-        model.fire();
-
         var ds = model.data('table'),
             data = ds.values();
 
@@ -35,13 +33,11 @@ describe('Aggregate', function() {
         expect(data[0]).to.have.property('count', values.length);
 
         done();
-      }, viewFactory);
+      }, modelFactory);
     });
 
     it('should calculate sum', function(done) {
       parseSpec(spec(['sum']), function(model) {
-        model.fire();
-
         var ds = model.data('table'),
             data = ds.values(),
             sum = values.reduce(function(sum, d) { return sum+d.y}, 0);
@@ -50,13 +46,11 @@ describe('Aggregate', function() {
         expect(data[0]).to.have.property('sum', sum);
 
         done();
-      }, viewFactory);
+      }, modelFactory);
     });
 
     it('should calculate avg', function(done) {
       parseSpec(spec(['avg']), function(model) {
-        model.fire();
-
         var ds = model.data('table'),
             data = ds.values(),
             count = values.length
@@ -67,13 +61,11 @@ describe('Aggregate', function() {
         expect(data[0]).to.have.property('avg', avg);
 
         done();
-      }, viewFactory);
+      }, modelFactory);
     });
 
     it('should calculate var', function(done) {
       parseSpec(spec(['var']), function(model) {
-        model.fire();
-
         var ds = model.data('table'),
             data = ds.values(),
             count = values.length
@@ -86,13 +78,11 @@ describe('Aggregate', function() {
         expect(data[0]).to.have.property('var', vr);
 
         done();
-      }, viewFactory);
+      }, modelFactory);
     });
 
     it('should calculate varp', function(done) {
       parseSpec(spec(['varp']), function(model) {
-        model.fire();
-
         var ds = model.data('table'),
             data = ds.values(),
             count = values.length
@@ -105,13 +95,11 @@ describe('Aggregate', function() {
         expect(data[0]).to.have.property('varp', varp);
 
         done();
-      }, viewFactory);
+      }, modelFactory);
     });
 
     it('should calculate stdev', function(done) {
       parseSpec(spec(['stdev']), function(model) {
-        model.fire();
-
         var ds = model.data('table'),
             data = ds.values(),
             count = values.length
@@ -124,13 +112,11 @@ describe('Aggregate', function() {
         expect(data[0]).to.have.property('stdev', stdev);
 
         done();
-      }, viewFactory);
+      }, modelFactory);
     });
 
     it('should calculate stdevp', function(done) {
       parseSpec(spec(['stdevp']), function(model) {
-        model.fire();
-
         var ds = model.data('table'),
             data = ds.values(),
             count = values.length
@@ -143,13 +129,11 @@ describe('Aggregate', function() {
         expect(data[0]).to.have.property('stdevp', stdevp);
 
         done();
-      }, viewFactory);
+      }, modelFactory);
     });
 
     it('should calculate median', function(done) {
       parseSpec(spec(['median']), function(model) {
-        model.fire();
-
         var ds = model.data('table'),
             data = ds.values(),
             vals = values.map(function(d) { return d.y }).sort(),
@@ -160,16 +144,92 @@ describe('Aggregate', function() {
         expect(data[0]).to.have.property('median', median);
 
         done();
-      }, viewFactory);
+      }, modelFactory);
+    });
+
+    it('should calculate min', function(done) {
+      parseSpec(spec(['min']), function(model) {
+        var ds = model.data('table'),
+            data = ds.values(),
+            vals = values.map(function(d) { return d.y }).sort(),
+            min = vals[0];
+
+        expect(data).to.have.length(1);
+        expect(data[0]).to.have.property('min', min);
+
+        done();
+      }, modelFactory);
+    });
+
+    it('should calculate max', function(done) {
+      parseSpec(spec(['max']), function(model) {
+        var ds = model.data('table'),
+            data = ds.values(),
+            vals = values.map(function(d) { return d.y }).sort(),
+            max = vals[vals.length-1];
+
+        expect(data).to.have.length(1);
+        expect(data[0]).to.have.property('max', max);
+
+        done();
+      }, modelFactory);
+    });
+
+    it('should handle renamed output', function(done) {
+      var s = spec(['min', 'max', 'median', 'stdevp', 'stdev', 'varp', 'var', 'avg', 'sum', 'count']);
+      s.data[0].transform[0].output = {
+          "count":    "a_count",
+          "avg":      "a_avg",
+          "min":      "a_min",
+          "max":      "a_max",
+          "sum":      "a_sum",
+          "mean":     "a_mean",
+          "var":      "a_var",
+          "stdev":    "a_stdev",
+          "varp":     "a_varp",
+          "stdevp":   "a_stdevp",
+          "median":   "a_median"
+        };
+
+      parseSpec(s, function(model) {
+        var ds = model.data('table'),
+            data = ds.values(),
+            count = values.length
+            sum = values.reduce(function(sum, d) { return sum+d.y}, 0),
+            avg = sum/count,
+            variance = values.reduce(function(variance, d) { return variance + Math.pow(d.y-avg, 2); }, 0),
+            vr = variance/(count-1),
+            varp = variance/count,
+            stdev = Math.sqrt(vr),
+            stdevp = Math.sqrt(varp),
+            vals = values.map(function(d) { return d.y }).sort(),
+            half = ~~(count/2),
+            median = count % 2 ? vals[half] : (vals[half-1] + vals[half])/2,
+            min = vals[0],
+            max = vals[vals.length-1];
+
+        expect(data).to.have.length(1);
+        expect(data[0]).to.have.property('a_count', count);
+        expect(data[0]).to.have.property('a_sum', sum);
+        expect(data[0]).to.have.property('a_avg', avg);
+        expect(data[0]).to.have.property('a_var', vr);
+        expect(data[0]).to.have.property('a_varp', varp);
+        expect(data[0]).to.have.property('a_stdev', stdev);
+        expect(data[0]).to.have.property('a_stdevp', stdevp);
+        expect(data[0]).to.have.property('a_median', median);
+        expect(data[0]).to.have.property('a_min', min);
+        expect(data[0]).to.have.property('a_max', max);
+
+        done();
+      }, modelFactory);
     });
 
     it('should handle streaming adds', function(done) {
-      parseSpec(spec(['median', 'stdevp', 'stdev', 'varp', 'var', 'avg', 'sum', 'count']), function(model) {
+      parseSpec(spec(['min', 'max', 'median', 'stdevp', 'stdev', 'varp', 'var', 'avg', 'sum', 'count']), function(model) {
         var a1 = {x: 21, y: 21},
             a2 = {x: 22, y: 95},
             a3 = {x: 23, y: 47};
 
-        model.fire();
         values.push(a1, a2, a3);
         model.data('table').add(a1).add(a2).add(a3).fire();
 
@@ -185,7 +245,9 @@ describe('Aggregate', function() {
             stdevp = Math.sqrt(varp),
             vals = values.map(function(d) { return d.y }).sort(),
             half = ~~(count/2),
-            median = count % 2 ? vals[half] : (vals[half-1] + vals[half])/2;
+            median = count % 2 ? vals[half] : (vals[half-1] + vals[half])/2,
+            min = vals[0],
+            max = vals[vals.length-1];
 
         expect(data).to.have.length(1);
         expect(data[0]).to.have.property('count', count);
@@ -196,14 +258,15 @@ describe('Aggregate', function() {
         expect(data[0]).to.have.property('stdev', stdev);
         expect(data[0]).to.have.property('stdevp', stdevp);
         expect(data[0]).to.have.property('median', median);
+        expect(data[0]).to.have.property('min', min);
+        expect(data[0]).to.have.property('max', max);
 
         done();
-      }, viewFactory);
+      }, modelFactory);
     });
 
     it('should handle streaming rems', function(done) {
-      parseSpec(spec(['median', 'stdevp', 'stdev', 'varp', 'var', 'avg', 'sum', 'count']), function(model) {
-        model.fire();
+      parseSpec(spec(['min', 'max', 'median', 'stdevp', 'stdev', 'varp', 'var', 'avg', 'sum', 'count']), function(model) {
         values = values.filter(function(d) { return d.y < 50 });
         model.data('table').remove(function(d) { return d.y >= 50 }).fire();
 
@@ -219,7 +282,9 @@ describe('Aggregate', function() {
             stdevp = Math.sqrt(varp),
             vals = values.map(function(d) { return d.y }).sort(),
             half = ~~(count/2),
-            median = count % 2 ? vals[half] : (vals[half-1] + vals[half])/2;
+            median = count % 2 ? vals[half] : (vals[half-1] + vals[half])/2,
+            min = vals[0],
+            max = vals[vals.length-1];
 
         expect(data).to.have.length(1);
         expect(data[0]).to.have.property('count', count);
@@ -230,14 +295,63 @@ describe('Aggregate', function() {
         expect(data[0]).to.have.property('stdev', stdev);
         expect(data[0]).to.have.property('stdevp', stdevp);
         expect(data[0]).to.have.property('median', median);
+        expect(data[0]).to.have.property('min', min);
+        expect(data[0]).to.have.property('max', max);
 
         done();
-      }, viewFactory);
+      }, modelFactory);
     });
-
   });
 
-  it('should set aggregates on facets');
+  it('should calculate stats on facets', function(done) {
+    var values = [
+      {"country":"US", "type": "gold", "count": 12},
+      {"country":"US", "type": "silver", "count": 13},
+      {"country":"US", "type": "bronze", "count": 15},
+      {"country":"Canada", "type": "gold", "count": 5},
+      {"country":"Canada", "type": "silver", "count": 4},
+      {"country":"Canada", "type": "bronze", "count": 3}
+    ];
+
+    var spec = {
+      "data": [{
+        "name": "table",
+        "values": values,
+        "transform": [{
+          "type": "facet", 
+          "keys": [{"field": "country"}],
+          "transform": [{
+            "type": "stats", 
+            "on": "count", 
+            "measures": ["min", "max", "median", "stdevp", "stdev", 
+              "varp", "var", "avg", "sum", "count"]}]
+        }]
+      }]
+    };
+
+    parseSpec(spec, function(model) {
+      var ds = model.data('table'),
+          data = ds.values();
+
+      expect(data).to.have.length(2);
+
+      expect(data[0]).to.have.property('key', 'US');
+      expect(data[0]).to.have.property('min', 12);
+      expect(data[0]).to.have.property('max', 15);
+      expect(data[0]).to.have.property('median', 13);
+      expect(data[0]).to.have.property('sum', 40);
+      expect(data[0]).to.have.property('count', 3);
+
+      expect(data[1]).to.have.property('key', 'Canada');
+      expect(data[1]).to.have.property('min', 3);
+      expect(data[1]).to.have.property('max', 5);
+      expect(data[1]).to.have.property('median', 4);
+      expect(data[1]).to.have.property('sum', 12);
+      expect(data[1]).to.have.property('count', 3);
+
+      done();
+    }, modelFactory);
+  });
 
   it('should handle filtered tuples');
 

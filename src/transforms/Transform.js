@@ -20,6 +20,13 @@ define(function(require, exports, module) {
 
   var proto = (Transform.prototype = new Node());
 
+  proto.clone = function() {
+    var n = Node.prototype.clone.call(this);
+    n.transform = this.transform;
+    for(var k in this) { n[k] = this[k]; }
+    return n;
+  };
+
   proto.transform = function(input, reset) { return input; };
   proto.evaluate = function(input) {
     // Many transforms store caches that must be invalidated if
@@ -31,16 +38,13 @@ define(function(require, exports, module) {
     return this.transform(input, reset);
   };
 
-  // Mocking an output parameter.
-  proto.output = {
-    set: function(transform, map) {
-      for (var key in transform._output) {
-        if (map[key] !== undefined) {
-          transform._output[key] = map[key];
-        }
+  proto.output = function(map) {
+    for (var key in this._output) {
+      if (map[key] !== undefined) {
+        this._output[key] = map[key];
       }
-      return transform;
     }
+    return this;
   };
 
   return Transform;

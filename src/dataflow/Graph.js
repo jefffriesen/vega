@@ -60,7 +60,7 @@ define(function(require, exports, module) {
     // so that we can ignore subsequent reflow pulses. To efficiently
     // use the JS array, we want lower ranked nodes on the right so
     // we can pop them. 
-    if(a.node == b.node) return a.pulse.reflow ? -1 : 1;
+    if(a.rank == b.rank) return a.pulse.reflow ? -1 : 1;
     else return b.rank - a.rank; 
   }); 
 
@@ -125,13 +125,16 @@ define(function(require, exports, module) {
   proto.connect = function(branch) {
     util.debug({}, ['connecting']);
     var graph = this;
-
     forEachNode(branch, function(n, c, i) {
       var data = n.dependency(C.DATA),
           signals = n.dependency(C.SIGNALS);
 
       if(data.length > 0) {
-        data.forEach(function(d) { graph.data(d).addListener(c); });
+        data.forEach(function(d) { 
+          var ds = graph.data(d);
+          ds.addListener(c); 
+          ds.needsPrev(n.needsPrev());
+        });
       }
 
       if(signals.length > 0) {

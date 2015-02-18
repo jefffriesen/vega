@@ -16,7 +16,7 @@ define(function(require, exports, module) {
 
   var proto = (Builder.prototype = new Node());
 
-  proto.init = function(model, renderer, def, mark, parent, inheritFrom) {
+  proto.init = function(model, renderer, def, mark, parent, parent_id, inheritFrom) {
     Node.prototype.init.call(this, model.graph)
       .router(true)
       .collector(true);
@@ -28,16 +28,19 @@ define(function(require, exports, module) {
     this._ds    = util.isString(this._from) ? model.data(this._from) : null;
     this._map   = {};
     this._items = [];
-    this._lastBuild = 0;
 
     mark.def = def;
     mark.marktype = def.type;
     mark.interactive = !(def.interactive === false);
     mark.items = this._items;
 
-    if(def.from && (def.from.transform || def.from.modify)) inlineDs.call(this);
-
     this._parent = parent;
+    this._parent_id = parent_id;
+
+    if(def.from && (def.from.mark || def.from.transform || def.from.modify)) {
+      inlineDs.call(this);
+    }
+
     this._encoder = new Encoder(this._model, this._mark);
     this._bounder = new Bounder(this._model, this._mark);
     this._collector = new Collector(this._model.graph);
@@ -66,9 +69,8 @@ define(function(require, exports, module) {
 
       fcs = this._ds.last();
       if(!fcs) return (output.reflow = true, output);
-      if(fcs.stamp <= this._lastBuild) return output;
+      if(fcs.stamp <= this._stamp) return output;
 
-      this._lastBuild = fcs.stamp;
       return joinChangeset.call(this, fcs);
     } else {
       data = util.isFunction(this._def.from) ? this._def.from() : [C.SENTINEL];
@@ -76,33 +78,51 @@ define(function(require, exports, module) {
     }
   };
 
-  // Mark-level transformations are handled here because they may be
-  // inheriting from a group's faceted datasource. 
+  // Reactive geometry and mark-level transformations are handled here 
+  // because they need their group's data-joined context. 
   function inlineDs() {
-    var name = [this._from, this._def.type, Date.now()].join('_');
-    var spec = {
-      name: name,
-      source: this._from,
-      transform: this._def.from.transform,
-      modify: this._def.from.modify
-    };
+    var from = this._def.from,
+        name, spec, sibling, output;
+
+    if(from.mark) {
+      name = ["vg", this._parent_id, from.mark].join("_");
+      spec = {
+        name: name,
+        transform: from.transform, 
+        modify: from.modify
+      };
+    } else {
+      name = ["vg", this._from, this._def.type, Date.now()].join("_");
+      spec = {
+        name: name,
+        source: this._from,
+        transform: from.transform,
+        modify: from.modify
+      };
+    }
 
     this._from = name;
     this._ds = parseData.datasource(this._model, spec);
 
-    // At this point, we have a new datasource but it is empty as
-    // the propagation cycle has already crossed the datasources. 
-    // So, we repulse just this datasource. This should be safe
-    // as the ds isn't connected to the scenegraph yet.
-    var output = this._ds.source().last(),
-        input  = changeset.create(output);
+    if(from.mark) {
+      sibling = this.sibling(from.mark);
+      sibling._bounder.addListener(this._ds.listener());
+    } else {
+      // At this point, we have a new datasource but it is empty as
+      // the propagation cycle has already crossed the datasources. 
+      // So, we repulse just this datasource. This should be safe
+      // as the ds isn't connected to the scenegraph yet.
+      
+      var output = this._ds.source().last();
+          input  = changeset.create(output);
 
-    input.add = output.add;
-    input.mod = output.mod;
-    input.rem = output.rem;
-    input.stamp = null;
-    this._ds.fire(input);
-  };
+      input.add = output.add;
+      input.mod = output.mod;
+      input.rem = output.rem;
+      input.stamp = null;
+      this._ds.fire(input);
+    }
+  }
 
   proto._pipeline = function() {
     return [this, this._encoder, this._collector, this._bounder, this._renderer];
@@ -127,13 +147,17 @@ define(function(require, exports, module) {
     return this;
   };
 
+  proto.sibling = function(name) {
+    return this._parent.child(name, this._parent_id);
+  };
+
   function newItem(d, stamp) {
     var item   = tuple.create(new Item(this._mark));
     item.datum = d;
 
     // For the root node's item
-    if(this._def.width)  tuple.set(item, "width",  this._def.width, stamp);
-    if(this._def.height) tuple.set(item, "height", this._def.height, stamp);
+    if(this._def.width)  tuple.set(item, "width",  this._def.width);
+    if(this._def.height) tuple.set(item, "height", this._def.height);
 
     return item;
   };
@@ -150,7 +174,7 @@ define(function(require, exports, module) {
     for(i=0, len=add.length; i<len; ++i) {
       key = keyf(datum = add[i]);
       item = newItem.call(this, datum, stamp);
-      tuple.set(item, "key", key, stamp);
+      tuple.set(item, "key", key);
       item.status = C.ENTER;
       this._map[key] = item;
       this._items.push(item);
@@ -159,7 +183,7 @@ define(function(require, exports, module) {
 
     for(i=0, len=mod.length; i<len; ++i) {
       item = this._map[key = keyf(datum = mod[i])];
-      tuple.set(item, "key", key, stamp);
+      tuple.set(item, "key", key);
       item.datum  = datum;
       item.status = C.UPDATE;
       output.mod.push(item);

@@ -1,95 +1,118 @@
 define(function(require, exports, module) {
   var Transform = require('./Transform'),
-      tuple = require('../dataflow/tuple'), 
-      changeset = require('../dataflow/changeset'), 
-      meas = require('./measures'),
-      util = require('../util/index');
+      tuple = require('../dataflow/tuple'),
+      changeset = require('../dataflow/changeset'),
+      util = require('../util/index'),
+      C = require('../util/constants');
 
   function Aggregate(graph) {
-    Transform.prototype.init.call(this, graph);
-    Transform.addParameters(this, {on: {type: "field"} });
-    // Stats parameter handled manually.
-
-    this._Measures = null;
-    this._cache = {};
-    return this;
+    if(graph) Transform.prototype.init.call(this, graph);
+    return this; 
   }
 
   var proto = (Aggregate.prototype = new Transform());
 
-  proto.stats = { 
-    set: function(transform, aggs) {
-      transform._Measures = meas.create(aggs.map(function(a) { return meas[a](); }));
-      return transform;
-    }
+  proto.init = function(graph) {
+    this._refs  = []; // accessors to groupby fields
+    this._cells = {};
+    return Transform.prototype.init.call(this, graph)
+      .router(true).needsPrev(true);
   };
 
-  function rst(input, output) {
-    for(var k in this._cache) { 
-      if(!input.facet) output.rem.push(this._cache[k].set(input.stamp));
-      this._cache[k] = null;
+  proto.data = function() { return this._cells; };
+
+  proto._reset = function(input, output) {
+    var k, c;
+    for(k in this._cells) {
+      if(!(c = this._cells[k])) continue;
+      output.rem.push(c.tpl);
     }
+    this._cells = {};
   };
 
-  function aggr(input) {
-    var k = input.facet ? input.facet.key : "",
-        a = this._cache[k],
-        t;
+  proto._keys = function(x) {
+    var keys = this._refs.reduce(function(g, f) {
+      return ((v = f(x)) !== undefined) ? (g.push(v), g) : g;
+    }, []), k = keys.join("|"), v;
+    return keys.length > 0 ? {keys: keys, key: k} : undefined;
+  };
 
-    if(!a) {
-      t = input.facet || tuple.create(null);
-      this._cache[k] = a = new this._Measures(t);
+  proto._cell = function(x) {
+    var k = this._keys(x);
+    return this._cells[k.key] || (this._cells[k.key] = this._new_cell(x, k));
+  };
+
+  proto._new_cell = function(x, k) {
+    return {
+      cnt: 0,
+      tpl: this._new_tuple(x, k),
+      flg: C.ADD_CELL
+    };
+  };
+
+  proto._new_tuple = function(x, k) {
+    return tuple.create(null, null);
+  };
+
+  proto._add = function(x) {
+    var cell = this._cell(x);
+    cell.cnt += 1;
+    cell.flg |= C.MOD_CELL;
+    return cell;
+  };
+
+  proto._rem = function(x) {
+    var cell = this._cell(x);
+    cell.cnt -= 1;
+    cell.flg |= C.MOD_CELL;
+    return cell;
+  };
+
+  proto._mod = function(x, reset) {
+    if(x._prev && x._prev !== C.SENTINEL && this._keys(x._prev) !== undefined) {
+      this._rem(x._prev);
+      return this._add(x);
+    } else if(reset) { // Signal change triggered reflow
+      return this._add(x);
     }
-
-    return a;
+    return this._cell(x);
   };
 
   proto.transform = function(input, reset) {
-    util.debug(input, ["aggregating"]);
+    var aggregate = this,
+        output = changeset.create(input),
+        k, c, f, t;
 
-    var k = input.facet ? input.facet.key : "",
-        output = input.facet ? input : changeset.create(),
-        field = this.on.get().accessor,
-        a, x;
+    if(reset) this._reset(input, output);
 
-    if(reset) rst.call(this, input, output);
-    a = aggr.call(this, input);
-
-    input.add.forEach(function(x) { a.add(field(x)); });
-    input.mod.forEach(function(x) { 
-      var prev = field(x._prev);
-      if(prev && prev.stamp == input.stamp) {
-        a.mod(field(x), prev.value); 
-      }
-    });
-    input.rem.forEach(function(x) { 
-      // Handle all these upstream cases:
-      // #1: Add(t) -> Rem(t)
-      // #2: Add(t) -> Mod(t) -> Rem(t)
-      // #3: Add(t) -> Mod(t) -> FilterOut(t)
-      var prev = field(x._prev);
-      if(prev && prev.stamp == input.stamp) { 
-        a.rem(prev.value);
+    input.add.forEach(function(x) { aggregate._add(x); });
+    input.mod.forEach(function(x) { aggregate._mod(x, reset); });
+    input.rem.forEach(function(x) {
+      if(x._prev && x._prev !== C.SENTINEL && aggregate._keys(x._prev) !== undefined) {
+        aggregate._rem(x._prev)
       } else {
-        a.rem(field(x));
+        aggregate._rem(x);
       }
     });
 
-    x = a.set(input.stamp);
-    if(input.facet) return input;
+    for(k in this._cells) {
+      c = this._cells[k];
+      if(!c) continue;
+      f = c.flg, t = c.tpl;
 
-    if (a.cnt === 0) {
-      if (a.flag === a.MOD) output.rem.push(x);
-      this._cache[k] = null;
-    } else if (a.flag & a.ADD) {
-      output.add.push(x);
-    } else if (a.flag & a.MOD) {
-      output.mod.push(x);
+      if(c.cnt === 0) {
+        if(f === C.MOD_CELL) output.rem.push(t);
+        this._cells[k] = null;
+      } else if(f & C.ADD_CELL) {
+        output.add.push(t);
+      } else if(f & C.MOD_CELL) {
+        output.mod.push(t)
+      }
+      c.flg = 0;
     }
-    a.flag = 0;
 
     return output;
-  };
+  }
 
   return Aggregate;
 });

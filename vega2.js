@@ -448,9 +448,13 @@ define("../node_modules/almond/almond", function(){});
 
 define('util/constants',['require','exports','module'],function(require, module, exports) {
   return {
+    ADD_CELL: 1,
+    MOD_CELL: 2,
+
     DATA: "data",
     FIELDS:  "fields",
     SCALES:  "scales",
+    SIGNAL:  "signal",
     SIGNALS: "signals",
     
     GROUP: "group",
@@ -473,8 +477,18 @@ define('util/constants',['require','exports','module'],function(require, module,
     TIME: "time",
     QUANTILE: "quantile",
 
+    DOMAIN: "domain",
+    RANGE: "range",
+
     MARK: "mark",
-    AXIS: "axis"
+    AXIS: "axis",
+
+    COUNT: "count",
+    MIN: "min",
+    MAX: "max",
+
+    ASC: "asc",
+    DESC: "desc"
   }
 });
 define('dataflow/changeset',['require','exports','module','../util/constants'],function(require, exports, module) {
@@ -494,8 +508,13 @@ define('dataflow/changeset',['require','exports','module','../util/constants'],f
     return out;
   }
 
-  function done(cs) {
-    // nothing for now
+  function finalize(cs) {
+    function rp(x) {
+      x._prev = (x._prev === undefined) ? undefined : C.SENTINEL;
+    }
+
+    cs.add.forEach(rp);
+    cs.mod.forEach(rp);
   }
 
   function copy(a, b) {
@@ -507,9 +526,9 @@ define('dataflow/changeset',['require','exports','module','../util/constants'],f
   }
 
   return {
-    create:  create,
-    done:    done,
-    copy:    copy
+    create: create,
+    copy: copy,
+    finalize: finalize,
   };
 });
 define('util/config',['require','exports','module','d3'],function(require, module, exports) {
@@ -912,26 +931,24 @@ define('dataflow/tuple',['require','exports','module','../util/index','../util/c
   function create(d, p) {
     var o = Object.create(util.isObject(d) ? d : {data: d});
     o._id = ++tuple_id;
-    // o._prev = p ? Object.create(p) : C.SENTINEL;
-    o._prev = p || C.SENTINEL;
+    // We might not want to track prev state (p == undefined),
+    // or delay prev object creation (p == null).
+    o._prev = p !== undefined ? p || C.SENTINEL : undefined;
     return o;
   }
 
   // WARNING: operators should only call this once per timestamp!
-  function set(t, k, v, stamp) {
+  function set(t, k, v) {
     var prev = t[k];
     if(prev === v) return;
-
-    if(prev && t._prev) set_prev(t, k);
+    set_prev(t, k);
     t[k] = v;
   }
 
-  function set_prev(t, k, stamp) {
+  function set_prev(t, k) {
+    if(t._prev === undefined) return;
     t._prev = (t._prev === C.SENTINEL) ? {} : t._prev;
-    t._prev[k] = {
-      value: t[k],
-      stamp: stamp
-    };
+    t._prev[k] = t[k];
   }
 
   function reset() { tuple_id = 1; }
@@ -970,6 +987,7 @@ define('dataflow/Node',['require','exports','module','../util/index','../util/co
 
     this._isRouter = false; // Responsible for propagating tuples, cannot ever be skipped
     this._isCollector = false;  // Holds a materialized dataset, pulse to reflow
+    this._needsPrev = false; // Does the operator require tuples' previous values? 
     return this;
   };
 
@@ -996,7 +1014,8 @@ define('dataflow/Node',['require','exports','module','../util/index','../util/co
     if(deps === null) { // Clear dependencies of a certain type
       while(d.length > 0) d.pop();
     } else {
-      d.push.apply(d, util.array(deps));
+      if(!util.isArray(deps) && d.indexOf(deps) < 0) d.push(deps);
+      else d.push.apply(d, util.array(deps));
     }
     return this;
   };
@@ -1010,6 +1029,12 @@ define('dataflow/Node',['require','exports','module','../util/index','../util/co
   proto.collector = function(bool) {
     if(!arguments.length) return this._isCollector;
     this._isCollector = !!bool;
+    return this;
+  };
+
+  proto.needsPrev = function(bool) {
+    if(!arguments.length) return this._needsPrev;
+    this._needsPrev = !!bool;
     return this;
   };
 
@@ -1128,6 +1153,7 @@ define('dataflow/Datasource',['require','exports','module','./changeset','./tupl
 
     this._pipeline  = null; // Pipeline of transformations.
     this._collector = null; // Collector to materialize output of pipeline
+    this._needsPrev = false; // Does any pipeline operator need to track prev?
   };
 
   var proto = Datasource.prototype;
@@ -1139,8 +1165,10 @@ define('dataflow/Datasource',['require','exports','module','./changeset','./tupl
   };
 
   proto.add = function(d) {
-    var add = this._input.add;
-    add.push.apply(add, util.array(d).map(function(d) { return tuple.create(d); }));
+    var add = this._input.add,
+        prev = this._needsPrev ? null : undefined;
+
+    add.push.apply(add, util.array(d).map(function(d) { return tuple.create(d, prev); }));
     return this;
   };
 
@@ -1151,12 +1179,15 @@ define('dataflow/Datasource',['require','exports','module','./changeset','./tupl
   };
 
   proto.update = function(where, field, func) {
-    var mod = this._input.mod;
+    var mod = this._input.mod,
+        prev = this._needsPrev ? null : undefined; 
+
     this._input.fields[field] = 1;
     this._data.filter(where).forEach(function(x) {
       var prev = x[field],
           next = func(x);
       if (prev !== next) {
+        if(x._prev === undefined && prev !== undefined) x._prev = C.SENTINEL;
         tuple.prev(x, field);
         x.__proto__[field] = next;
         if(mod.indexOf(x) < 0) mod.push(x);
@@ -1175,7 +1206,20 @@ define('dataflow/Datasource',['require','exports','module','./changeset','./tupl
     return this;
   };
 
-  proto.last = function() { return this._output; }
+  proto.needsPrev = function(p) {
+    // If we've not needed prev in the past, but a new dataflow node needs it now
+    // ensure existing tuples have prev set.
+    if(!this._needsPrev && p) { 
+      this._data.forEach(function(d) { 
+        if(d._prev === undefined) d._prev = C.SENTINEL 
+      });
+    }
+
+    this._needsPrev = this._needsPrev || p;
+    return this;
+  };
+
+  proto.last = function() { return this._output; };
 
   proto.fire = function(input) {
     if(input) this._input = input;
@@ -1190,6 +1234,7 @@ define('dataflow/Datasource',['require','exports','module','./changeset','./tupl
       // the output.
       ds._collector = new Collector(this._graph);
       pipeline.push(ds._collector);
+      ds._needsPrev = pipeline.some(function(p) { return p.needsPrev(); });
     }
 
     // Input node applies the datasource's delta, and propagates it to 
@@ -1203,7 +1248,6 @@ define('dataflow/Datasource',['require','exports','module','./changeset','./tupl
 
       var delta = ds._input, 
           out = changeset.create(input);
-      out.facet = ds._facet;
 
       if(input.reflow) {
         out.mod = ds._source ? ds._source.values().slice() : ds._data.slice();
@@ -1220,20 +1264,11 @@ define('dataflow/Datasource',['require','exports','module','./changeset','./tupl
         ds._input = changeset.create();
 
         out.add = delta.add; 
+        out.mod = delta.mod;
         out.rem = delta.rem;
-
-        // Assign a timestamp to any updated tuples
-        out.mod = delta.mod.map(function(x) { 
-          var k;
-          if(x._prev === C.SENTINEL) return x;
-          for(k in x._prev) {
-            if(x._prev[k].stamp === undefined) x._prev[k].stamp = input.stamp;
-          }
-          return x;
-        }); 
       }
 
-      return out;
+      return (out.facet = ds._facet, out);
     };
 
     pipeline.unshift(input);
@@ -1266,18 +1301,39 @@ define('dataflow/Datasource',['require','exports','module','./changeset','./tupl
     return this;
   };
 
+  proto.listener = function() { 
+    var l = new Node(this._graph),
+        dest = this,
+        prev = this._needsPrev ? null : undefined;
+
+    l.evaluate = function(input) {
+      this._cache = this._cache || {};  // to propagate tuples correctly
+      var output  = changeset.create(input);
+
+      output.add = input.add.map(function(t) {
+        return (l._cache[t._id] = tuple.create(t, t._prev !== undefined ? t._prev : prev));
+      });
+      output.mod = input.mod.map(function(t) { return l._cache[t._id]; });
+      output.rem = input.rem.map(function(t) { 
+        var o = l._cache[t._id];
+        l._cache[t._id] = null;
+        return o;
+      });
+
+      return (dest._input = output);
+    };
+
+    l.addListener(this._pipeline[0]);
+    return l;
+  };
+
   proto.addListener = function(l) {
     if(l instanceof Datasource) {
-      var source = this, dest = l;
-      l = new Node(this._graph);
-      l.evaluate = function(input) {
-        dest._input = source._output;
-        return input;
-      };
-      l.addListener(dest._pipeline[0]);
+      if(this._collector) this._collector.addListener(l.listener());
+      else this._pipeline[0].addListener(l.listener());
+    } else {
+      this._pipeline[this._pipeline.length-1].addListener(l);      
     }
-
-    this._pipeline[this._pipeline.length-1].addListener(l);
   };
 
   proto.removeListener = function(l) {
@@ -1378,7 +1434,7 @@ define('dataflow/Graph',['require','exports','module','d3','./Datasource','./Sig
     // so that we can ignore subsequent reflow pulses. To efficiently
     // use the JS array, we want lower ranked nodes on the right so
     // we can pop them. 
-    if(a.node == b.node) return a.pulse.reflow ? -1 : 1;
+    if(a.rank == b.rank) return a.pulse.reflow ? -1 : 1;
     else return b.rank - a.rank; 
   }); 
 
@@ -1443,13 +1499,16 @@ define('dataflow/Graph',['require','exports','module','d3','./Datasource','./Sig
   proto.connect = function(branch) {
     util.debug({}, ['connecting']);
     var graph = this;
-
     forEachNode(branch, function(n, c, i) {
       var data = n.dependency(C.DATA),
           signals = n.dependency(C.SIGNALS);
 
       if(data.length > 0) {
-        data.forEach(function(d) { graph.data(d).addListener(c); });
+        data.forEach(function(d) { 
+          var ds = graph.data(d);
+          ds.addListener(c); 
+          ds.needsPrev(n.needsPrev());
+        });
       }
 
       if(signals.length > 0) {
@@ -1558,7 +1617,7 @@ define('scene/Encoder',['require','exports','module','../dataflow/Node','../util
           return db[ds] = model.data(ds).values(), db;
         }, {});
 
-    enc.call(enc, stamp, item, item.mark.group||item, trans, db, sg, model.predicates());
+    enc.call(enc, item, item.mark.group||item, trans, db, sg, model.predicates());
   }
 
   return Encoder;
@@ -2890,7 +2949,6 @@ define('transforms/Parameter',['require','exports','module','../parse/expr','../
   function Parameter(name, type) {
     this._name = name;
     this._type = type;
-    this._stamp = 0; // Last stamp seen on resolved signals
 
     // If parameter is defined w/signals, it must be resolved
     // on every pulse.
@@ -2921,7 +2979,7 @@ define('transforms/Parameter',['require','exports','module','../parse/expr','../
   proto.get = function(graph) {
     var isData  = dataType.test(this._type),
         isField = fieldType.test(this._type),
-        s, sg, idx, val, last;
+        s, idx, val;
 
     // If we don't require resolution, return the value immediately.
     if(!this._resolution) return this._get();
@@ -2933,17 +2991,14 @@ define('transforms/Parameter',['require','exports','module','../parse/expr','../
 
     for(s in this._signals) {
       idx  = this._signals[s];
-      sg   = graph.signal(s); 
-      val  = sg.value();
-      last = sg.last();
+      val  = graph.signalRef(s);
 
       if(isField) {
-        this._accessors[idx] = this._stamp <= last ? 
+        this._accessors[idx] = this._value[idx] != val ? 
           util.accessor(val) : this._accessors[idx];
       }
 
       this._value[idx] = val;
-      this._stamp = Math.max(this._stamp, last);
     }
 
     return this._get();
@@ -3013,6 +3068,13 @@ define('transforms/Transform',['require','exports','module','../dataflow/Node','
 
   var proto = (Transform.prototype = new Node());
 
+  proto.clone = function() {
+    var n = Node.prototype.clone.call(this);
+    n.transform = this.transform;
+    for(var k in this) { n[k] = this[k]; }
+    return n;
+  };
+
   proto.transform = function(input, reset) { return input; };
   proto.evaluate = function(input) {
     // Many transforms store caches that must be invalidated if
@@ -3024,268 +3086,16 @@ define('transforms/Transform',['require','exports','module','../dataflow/Node','
     return this.transform(input, reset);
   };
 
-  // Mocking an output parameter.
-  proto.output = {
-    set: function(transform, map) {
-      for (var key in transform._output) {
-        if (map[key] !== undefined) {
-          transform._output[key] = map[key];
-        }
+  proto.output = function(map) {
+    for (var key in this._output) {
+      if (map[key] !== undefined) {
+        this._output[key] = map[key];
       }
-      return transform;
     }
+    return this;
   };
 
   return Transform;
-});
-define('util/quickselect',[],function() {
-  return function quickselect(k, x) {
-    function swap(a, b) {
-      var t = x[a];
-      x[a] = x[b];
-      x[b] = t;
-    }
-    
-    var left = 0,
-        right = x.length - 1,
-        pos, i, pivot;
-    
-    while (left < right) {
-      pivot = x[k];
-      swap(k, right);
-      for (i = pos = left; i < right; ++i) {
-        if (x[i] < pivot) { swap(i, pos++); }
-      }
-      swap(right, pos);
-      if (pos === k) break;
-      if (pos < k) left = pos + 1;
-      else right = pos - 1;
-    }
-    return x[k];
-  };
-});
-define('transforms/measures',['require','exports','module','../dataflow/tuple','../util/quickselect'],function(require, exports, module) {
-  var tuple = require('../dataflow/tuple'),
-      quickselect = require('../util/quickselect');
-
-  var types = {
-    "count": measure({
-      name: "count",
-      init: "this.cnt = 0;",
-      add:  "this.cnt += 1;",
-      rem:  "this.cnt -= 1;",
-      set:  "this.cnt"
-    }),
-    "sum": measure({
-      name: "sum",
-      init: "this.sum = 0;",
-      add:  "this.sum += v;",
-      rem:  "this.sum -= v;",
-      set:  "this.sum"
-    }),
-    "avg": measure({
-      name: "avg",
-      init: "this.avg = 0;",
-      add:  "var d = v - this.avg; this.avg += d / this.cnt;",
-      rem:  "var d = v - this.avg; this.avg -= d / this.cnt;",
-      set:  "this.avg",
-      req:  ["count"], idx: 1
-    }),
-    "var": measure({
-      name: "var",
-      init: "this.dev = 0;",
-      add:  "this.dev += d * (v - this.avg);",
-      rem:  "this.dev -= d * (v - this.avg);",
-      set:  "this.dev / (this.cnt-1)",
-      req:  ["avg"], idx: 2
-    }),
-    "varp": measure({
-      name: "varp",
-      init: "",
-      add:  "",
-      rem:  "",
-      set:  "this.dev / this.cnt",
-      req:  ["var"], idx: 3
-    }),
-    "stdev": measure({
-      name: "stdev",
-      init: "",
-      add:  "",
-      rem:  "",
-      set:  "Math.sqrt(this.dev / (this.cnt-1))",
-      req:  ["var"], idx: 4
-    }),
-    "stdevp": measure({
-      name: "stdevp",
-      init: "",
-      add:  "",
-      rem:  "",
-      set:  "Math.sqrt(this.dev / this.cnt)",
-      req:  ["var"], idx: 5
-    }),
-    "median": measure({
-      name: "median",
-      init: "this.val = [];",
-      add:  "this.val.push(v);",
-      rem:  "this.val[this.val.indexOf(v)] = this.val[this.val.length-1];" +
-            "this.val.length = this.val.length - 1;",
-      set:  "this.sel(~~(this.cnt/2), this.val)",
-      req: ["count"], idx: 6
-    })
-  };
-
-  function measure(base) {
-    return function(out) {
-      var m = Object.create(base);
-      m.out = out || base.name;
-      if (!m.idx) m.idx = 0;
-      return m;
-    };
-  }
-
-  function resolve(agg) {
-    function collect(m, a) {
-      (a.req || []).forEach(function(r) {
-        if (!m[r]) collect(m, m[r] = types[r]());
-      });
-      return m;
-    }
-    var map = agg.reduce(collect,
-      agg.reduce(function(m, a) { return (m[a.name] = a, m); }, {}));
-    var all = [];
-    for (var k in map) all.push(map[k]);
-    all.sort(function(a,b) { return a.idx - b.idx; });
-    return all;
-  }
-
-  function compile(agg) {
-    var all = resolve(agg),
-        ctr = "this.flag = this.ADD; this.tuple = t;",
-        add = "",
-        rem = "",
-        set = "var t = this.tuple;";
-    
-    all.forEach(function(a) { ctr += a.init; add += a.add; rem += a.rem; });
-    agg.forEach(function(a) { set += "this.tpl.set(t,'"+a.out+"',"+a.set+", stamp);"; });
-    add += "this.flag |= this.MOD;"
-    rem += "this.flag |= this.MOD;"
-    set += "return t;"
-
-    ctr = Function("t", ctr);
-    ctr.prototype.ADD = 1;
-    ctr.prototype.MOD = 2;
-    ctr.prototype.add = Function("v", add);
-    ctr.prototype.rem = Function("v", rem);
-    ctr.prototype.set = Function("stamp", set);
-    ctr.prototype.mod = mod;
-    ctr.prototype.tpl = tuple;
-    ctr.prototype.sel = quickselect;
-    return ctr;
-  }
-
-  function mod(v_new, v_old) {
-    if (v_old === undefined || v_old === v_new) return;
-    this.rem(v_old);
-    this.add(v_new);
-  };
-
-  types.create = compile;
-  return types;
-});
-define('transforms/Aggregate',['require','exports','module','./Transform','../dataflow/tuple','../dataflow/changeset','./measures','../util/index'],function(require, exports, module) {
-  var Transform = require('./Transform'),
-      tuple = require('../dataflow/tuple'), 
-      changeset = require('../dataflow/changeset'), 
-      meas = require('./measures'),
-      util = require('../util/index');
-
-  function Aggregate(graph) {
-    Transform.prototype.init.call(this, graph);
-    Transform.addParameters(this, {on: {type: "field"} });
-    // Stats parameter handled manually.
-
-    this._Measures = null;
-    this._cache = {};
-    return this;
-  }
-
-  var proto = (Aggregate.prototype = new Transform());
-
-  proto.stats = { 
-    set: function(transform, aggs) {
-      transform._Measures = meas.create(aggs.map(function(a) { return meas[a](); }));
-      return transform;
-    }
-  };
-
-  function rst(input, output) {
-    for(var k in this._cache) { 
-      if(!input.facet) output.rem.push(this._cache[k].set(input.stamp));
-      this._cache[k] = null;
-    }
-  };
-
-  function aggr(input) {
-    var k = input.facet ? input.facet.key : "",
-        a = this._cache[k],
-        t;
-
-    if(!a) {
-      t = input.facet || tuple.create(null);
-      this._cache[k] = a = new this._Measures(t);
-    }
-
-    return a;
-  };
-
-  proto.transform = function(input, reset) {
-    util.debug(input, ["aggregating"]);
-
-    var k = input.facet ? input.facet.key : "",
-        output = input.facet ? input : changeset.create(),
-        field = this.on.get().accessor,
-        a, x;
-
-    if(reset) rst.call(this, input, output);
-    a = aggr.call(this, input);
-
-    input.add.forEach(function(x) { a.add(field(x)); });
-    input.mod.forEach(function(x) { 
-      var prev = field(x._prev);
-      if(prev && prev.stamp == input.stamp) {
-        a.mod(field(x), prev.value); 
-      }
-    });
-    input.rem.forEach(function(x) { 
-      // Handle all these upstream cases:
-      // #1: Add(t) -> Rem(t)
-      // #2: Add(t) -> Mod(t) -> Rem(t)
-      // #3: Add(t) -> Mod(t) -> FilterOut(t)
-      var prev = field(x._prev);
-      if(prev && prev.stamp == input.stamp) { 
-        a.rem(prev.value);
-      } else {
-        a.rem(field(x));
-      }
-    });
-
-    x = a.set(input.stamp);
-    if(input.facet) return input;
-
-    if (a.cnt === 0) {
-      if (a.flag === a.MOD) output.rem.push(x);
-      this._cache[k] = null;
-    } else if (a.flag & a.ADD) {
-      output.add.push(x);
-    } else if (a.flag & a.MOD) {
-      output.mod.push(x);
-    }
-    a.flag = 0;
-
-    return output;
-  };
-
-  return Aggregate;
 });
 define('util/bins',['require','exports','module'],function(require, module, exports) {
 
@@ -3405,24 +3215,141 @@ define('transforms/Bin',['require','exports','module','./Transform','../util/ind
 
   return Bin
 });
-define('transforms/Facet',['require','exports','module','./Transform','../dataflow/tuple','../dataflow/changeset','../util/index'],function(require, exports, module) {
+define('transforms/Aggregate',['require','exports','module','./Transform','../dataflow/tuple','../dataflow/changeset','../util/index','../util/constants'],function(require, exports, module) {
   var Transform = require('./Transform'),
-      tuple = require('../dataflow/tuple'), 
+      tuple = require('../dataflow/tuple'),
       changeset = require('../dataflow/changeset'),
-      util = require('../util/index');
+      util = require('../util/index'),
+      C = require('../util/constants');
 
-  var ADD = 1, MOD = 2;
-
-  function Facet(graph) {
-    Transform.prototype.init.call(this, graph);
-    Transform.addParameters(this, {keys: {type: "array<field>"} });
-
-    this._cells = {};
-    this._pipeline = [];
-    return this.router(true);
+  function Aggregate(graph) {
+    if(graph) Transform.prototype.init.call(this, graph);
+    return this; 
   }
 
-  var proto = (Facet.prototype = new Transform());
+  var proto = (Aggregate.prototype = new Transform());
+
+  proto.init = function(graph) {
+    this._refs  = []; // accessors to groupby fields
+    this._cells = {};
+    return Transform.prototype.init.call(this, graph)
+      .router(true).needsPrev(true);
+  };
+
+  proto.data = function() { return this._cells; };
+
+  proto._reset = function(input, output) {
+    var k, c;
+    for(k in this._cells) {
+      if(!(c = this._cells[k])) continue;
+      output.rem.push(c.tpl);
+    }
+    this._cells = {};
+  };
+
+  proto._keys = function(x) {
+    var keys = this._refs.reduce(function(g, f) {
+      return ((v = f(x)) !== undefined) ? (g.push(v), g) : g;
+    }, []), k = keys.join("|"), v;
+    return keys.length > 0 ? {keys: keys, key: k} : undefined;
+  };
+
+  proto._cell = function(x) {
+    var k = this._keys(x);
+    return this._cells[k.key] || (this._cells[k.key] = this._new_cell(x, k));
+  };
+
+  proto._new_cell = function(x, k) {
+    return {
+      cnt: 0,
+      tpl: this._new_tuple(x, k),
+      flg: C.ADD_CELL
+    };
+  };
+
+  proto._new_tuple = function(x, k) {
+    return tuple.create(null, null);
+  };
+
+  proto._add = function(x) {
+    var cell = this._cell(x);
+    cell.cnt += 1;
+    cell.flg |= C.MOD_CELL;
+    return cell;
+  };
+
+  proto._rem = function(x) {
+    var cell = this._cell(x);
+    cell.cnt -= 1;
+    cell.flg |= C.MOD_CELL;
+    return cell;
+  };
+
+  proto._mod = function(x, reset) {
+    if(x._prev && x._prev !== C.SENTINEL && this._keys(x._prev) !== undefined) {
+      this._rem(x._prev);
+      return this._add(x);
+    } else if(reset) { // Signal change triggered reflow
+      return this._add(x);
+    }
+    return this._cell(x);
+  };
+
+  proto.transform = function(input, reset) {
+    var aggregate = this,
+        output = changeset.create(input),
+        k, c, f, t;
+
+    if(reset) this._reset(input, output);
+
+    input.add.forEach(function(x) { aggregate._add(x); });
+    input.mod.forEach(function(x) { aggregate._mod(x, reset); });
+    input.rem.forEach(function(x) {
+      if(x._prev && x._prev !== C.SENTINEL && aggregate._keys(x._prev) !== undefined) {
+        aggregate._rem(x._prev)
+      } else {
+        aggregate._rem(x);
+      }
+    });
+
+    for(k in this._cells) {
+      c = this._cells[k];
+      if(!c) continue;
+      f = c.flg, t = c.tpl;
+
+      if(c.cnt === 0) {
+        if(f === C.MOD_CELL) output.rem.push(t);
+        this._cells[k] = null;
+      } else if(f & C.ADD_CELL) {
+        output.add.push(t);
+      } else if(f & C.MOD_CELL) {
+        output.mod.push(t)
+      }
+      c.flg = 0;
+    }
+
+    return output;
+  }
+
+  return Aggregate;
+});
+define('transforms/Facet',['require','exports','module','./Transform','./Aggregate','../dataflow/tuple','../dataflow/changeset','../util/index','../util/constants'],function(require, exports, module) {
+  var Transform = require('./Transform'),
+      Aggregate = require('./Aggregate'),
+      tuple = require('../dataflow/tuple'), 
+      changeset = require('../dataflow/changeset'),
+      util = require('../util/index'),
+      C = require('../util/constants');
+
+  function Facet(graph) {
+    Aggregate.prototype.init.call(this, graph);
+    Transform.addParameters(this, {keys: {type: "array<field>"} });
+
+    this._pipeline = [];
+    return this;
+  }
+
+  var proto = (Facet.prototype = new Aggregate());
 
   proto.pipeline = function(pipeline) {
     if(!arguments.length) return this._pipeline;
@@ -3430,107 +3357,79 @@ define('transforms/Facet',['require','exports','module','./Transform','../datafl
     return this;
   };
 
-  function rst(input, output) {
+  proto._reset = function(input, output) {
+    var k, c;
     for(k in this._cells) {
       c = this._cells[k];
-      output.rem.push(c.t);
+      if(!c) continue;
+      output.rem.push(c.tpl);
       c.delete();
     }
+    this._cells = {};
   };
 
-  function cell(x, prev, stamp) {
-    var facet = this,
-        accessors = this.keys.get(this._graph).accessors;
+  proto._new_tuple = function(x, k) {
+    return tuple.create(k, null);
+  };
 
-    var keys = accessors.reduce(function(v, f) {
-      var p = null;
-      if(prev && (p = f(x._prev)) !== undefined && p.stamp >= stamp) {
-        return (v.push(p.value), v);
-      } else {
-        return (v.push(f(x)), v);
-      }
-    }, []), k = keys.join("|");
-
-    if(this._cells[k]) return this._cells[k];
-
+  proto._new_cell = function(x, k) {
     // Rather than sharing the pipeline between all nodes,
     // give each cell its individual pipeline. This allows
     // dynamically added collectors to do the right thing
     // when wiring up the pipelines.
-    var cp = this._pipeline.map(function(n) { return n.clone(); }),
-        t  = tuple.create({keys: keys, key: k}),
-        ds = this._graph.data("vg_"+t._id, cp, t);
+    var cell = Aggregate.prototype._new_cell.call(this, x, k),
+        pipeline = this._pipeline.map(function(n) { return n.clone(); }),
+        facet = this,
+        t = cell.tpl;
 
-    this.addListener(cp[0]);
-    // cp[cp.length-1].addListener(node.parentCollector);
-
-    var del = function() {
-      util.debug({}, ["deleting cell", k]);
-
-      facet.removeListener(cp[0]);
-      facet._graph.disconnect(cp);
-      delete facet._cells[k];
+    cell.ds = this._graph.data("vg_"+t._id, pipeline, t);
+    cell.delete = function() {
+      util.debug({}, ["deleting cell", k.key]);
+      facet.removeListener(pipeline[0]);
+      facet._graph.disconnect(pipeline);
     };
 
-    return (this._cells[k] = {t: t, s: ADD, ds: ds, delete: del, count: 0});
+    this.addListener(pipeline[0]);
+
+    return cell;
+  };
+
+  proto._add = function(x) {
+    var cell = Aggregate.prototype._add.call(this, x);
+    cell.ds._input.add.push(x);
+    return cell;
+  };
+
+  proto._mod = function(x, reset) {
+    var cell = Aggregate.prototype._mod.call(this, x, reset);
+    if(!(cell.flg & C.ADD_CELL)) cell.ds._input.mod.push(x); // Propagate tuples
+    cell.flg |= C.MOD_CELL;
+    return cell;
+  };
+
+  proto._rem = function(x) {
+    var cell = Aggregate.prototype._rem.call(this, x);
+    cell.ds._input.rem.push(x);
+    return cell;
   };
 
   proto.transform = function(input, reset) {
     util.debug(input, ["faceting"]);
 
-    var facet = this,
-        output = changeset.create(input),
-        k, c, x, d, i, len;
+    this._refs = this.keys.get(this._graph).accessors;
 
-    if(reset) rst.call(this, input, output);
+    var output = Aggregate.prototype.transform.call(this, input, reset),
+        k, c;
 
-    input.add.forEach(function(x) {
-      var c = cell.call(facet, x);
-      c.count += 1;
-      c.s |= MOD;
-      c.ds._input.add.push(x);
-    });
-
-    input.mod.forEach(function(x) {
-      var c = cell.call(facet, x), 
-          prev = cell.call(facet, x, true, input.stamp);
-
-      if(c !== prev) {
-        prev.count -= 1;
-        prev.s |= MOD;
-        prev.ds._input.rem.push(x);
-      }
-
-      if(c.s & ADD) {
-        c.count += 1;
-        c.ds._input.add.push(x);
-      } else {
-        c.ds._input.mod.push(x);
-      }
-
-      c.s |= MOD;
-    });
-
-    input.rem.forEach(function(x) {
-      var c = cell.call(facet, x);
-      c.count -= 1;
-      c.s |= MOD;
-      c.ds._input.rem.push(x);
-    });
-
-    for (k in this._cells) {
-      c = this._cells[k], x = c.t;
-      // propagate sort, signals, fields, etc.
-      changeset.copy(input, c.ds._input);
-      if (c.count === 0) {
-        if (c.s === MOD) output.rem.push(x);
+    for(k in this._cells) {
+      c = this._cells[k];
+      if(c == null) continue;
+      if(c.cnt === 0) {
         c.delete();
-      } else if (c.s & ADD) {
-        output.add.push(x);
-      } else if (c.s & MOD) {
-        output.mod.push(x);
+      } else {
+        // propagate sort, signals, fields, etc.
+        changeset.copy(input, c.ds._input);
       }
-      c.s = 0;
     }
 
     return output;
@@ -3612,7 +3511,7 @@ define('transforms/Fold',['require','exports','module','./Transform','../util/in
     this._output = {key: "key", value: "value"};
     this._cache = {};
 
-    return this.router(true);
+    return this.router(true).needsPrev(true);
   }
 
   var proto = (Fold.prototype = new Transform());
@@ -3636,8 +3535,8 @@ define('transforms/Fold',['require','exports','module','./Transform','../util/in
       d = data[i];
       for(j=0; j<flen; ++j) {
         t = get_tuple.call(this, d, j, flen);  
-        tuple.set(t, this._output.key, fields[j], stamp);
-        tuple.set(t, this._output.value, accessors[j](d), stamp);
+        tuple.set(t, this._output.key, fields[j]);
+        tuple.set(t, this._output.value, accessors[j](d));
         out.push(t);
       }      
     }
@@ -3692,7 +3591,7 @@ define('transforms/Formula',['require','exports','module','./Transform','../data
     var val = expr.eval(this._graph, this.expr.get(this._graph), 
       x, null, null, null, this.dependency(C.SIGNALS));
 
-    tuple.set(x, field, val, stamp); 
+    tuple.set(x, field, val); 
   };
 
   proto.transform = function(input) {
@@ -3733,6 +3632,321 @@ define('transforms/Sort',['require','exports','module','./Transform','../parse/e
 
   return Sort;
 });
+define('util/quickselect',[],function() {
+  return function quickselect(k, x) {
+    function swap(a, b) {
+      var t = x[a];
+      x[a] = x[b];
+      x[b] = t;
+    }
+    
+    var left = 0,
+        right = x.length - 1,
+        pos, i, pivot;
+    
+    while (left < right) {
+      pivot = x[k];
+      swap(k, right);
+      for (i = pos = left; i < right; ++i) {
+        if (x[i] < pivot) { swap(i, pos++); }
+      }
+      swap(right, pos);
+      if (pos === k) break;
+      if (pos < k) left = pos + 1;
+      else right = pos - 1;
+    }
+    return x[k];
+  };
+});
+define('transforms/measures',['require','exports','module','../dataflow/tuple','../util/quickselect','../util/constants'],function(require, exports, module) {
+  var tuple = require('../dataflow/tuple'),
+      quickselect = require('../util/quickselect'),
+      C = require('../util/constants');
+
+  var types = {
+    "count": measure({
+      name: "count",
+      init: "this.cnt = 0;",
+      add:  "this.cnt += 1;",
+      rem:  "this.cnt -= 1;",
+      set:  "this.cnt"
+    }),
+    "sum": measure({
+      name: "sum",
+      init: "this.sum = 0;",
+      add:  "this.sum += v;",
+      rem:  "this.sum -= v;",
+      set:  "this.sum"
+    }),
+    "avg": measure({
+      name: "avg",
+      init: "this.avg = 0;",
+      add:  "var d = v - this.avg; this.avg += d / this.cnt;",
+      rem:  "var d = v - this.avg; this.avg -= d / this.cnt;",
+      set:  "this.avg",
+      req:  ["count"], idx: 1
+    }),
+    "var": measure({
+      name: "var",
+      init: "this.dev = 0;",
+      add:  "this.dev += d * (v - this.avg);",
+      rem:  "this.dev -= d * (v - this.avg);",
+      set:  "this.dev / (this.cnt-1)",
+      req:  ["avg"], idx: 2
+    }),
+    "varp": measure({
+      name: "varp",
+      init: "",
+      add:  "",
+      rem:  "",
+      set:  "this.dev / this.cnt",
+      req:  ["var"], idx: 3
+    }),
+    "stdev": measure({
+      name: "stdev",
+      init: "",
+      add:  "",
+      rem:  "",
+      set:  "Math.sqrt(this.dev / (this.cnt-1))",
+      req:  ["var"], idx: 4
+    }),
+    "stdevp": measure({
+      name: "stdevp",
+      init: "",
+      add:  "",
+      rem:  "",
+      set:  "Math.sqrt(this.dev / this.cnt)",
+      req:  ["var"], idx: 5
+    }),
+    "median": measure({
+      name: "median",
+      init: "this.val = [];",
+      add:  "this.val.push(v);",
+      rem:  "this.val[this.val.indexOf(v)] = this.val[this.val.length-1];" +
+            "this.val.length = this.val.length - 1;",
+      set:  "this.sel(~~(this.cnt/2), this.val)",
+      req: ["count"], idx: 6
+    }),
+    "min": measure({
+      name: "min",
+      init: "",
+      add: "",
+      rem: "",
+      set: "this.sel(0, this.val)",
+      req: ["median"]
+    }),
+    "max": measure({
+      name: "max",
+      init: "",
+      add: "",
+      rem: "",
+      set: "this.sel(this.val.length-1, this.val)",
+      req: ["median"]
+    })
+  };
+
+  function measure(base) {
+    return function(out) {
+      var m = Object.create(base);
+      m.out = out || base.name;
+      if (!m.idx) m.idx = 0;
+      return m;
+    };
+  }
+
+  function resolve(agg) {
+    function collect(m, a) {
+      (a.req || []).forEach(function(r) {
+        if (!m[r]) collect(m, m[r] = types[r]());
+      });
+      return m;
+    }
+    var map = agg.reduce(collect,
+      agg.reduce(function(m, a) { return (m[a.name] = a, m); }, {}));
+    var all = [];
+    for (var k in map) all.push(map[k]);
+    all.sort(function(a,b) { return a.idx - b.idx; });
+    return all;
+  }
+
+  function compile(agg) {
+    var all = resolve(agg),
+        ctr = "this.flg = this.ADD; this.tpl = t;",
+        add = "",
+        rem = "",
+        set = "var t = this.tpl;";
+    
+    all.forEach(function(a) { ctr += a.init; add += a.add; rem += a.rem; });
+    agg.forEach(function(a) { set += "this.tuple.set(t,'"+a.out+"',"+a.set+");"; });
+    add += "this.flg |= this.MOD;"
+    rem += "this.flg |= this.MOD;"
+    set += "return t;"
+
+    ctr = Function("t", ctr);
+    ctr.prototype.ADD = C.ADD_CELL;
+    ctr.prototype.MOD = C.MOD_CELL;
+    ctr.prototype.add = Function("v", add);
+    ctr.prototype.rem = Function("v", rem);
+    ctr.prototype.set = Function("stamp", set);
+    ctr.prototype.mod = mod;
+    ctr.prototype.sel = quickselect;
+    ctr.prototype.tuple = tuple;
+    return ctr;
+  }
+
+  function mod(v_new, v_old) {
+    if (v_old === undefined || v_old === v_new) return;
+    this.rem(v_old);
+    this.add(v_new);
+  };
+
+  types.create = compile;
+  return types;
+});
+define('transforms/Stats',['require','exports','module','./Transform','./Aggregate','../dataflow/tuple','../dataflow/changeset','./measures','../util/index','../util/constants'],function(require, exports, module) {
+  var Transform = require('./Transform'),
+      Aggregate = require('./Aggregate'),
+      tuple = require('../dataflow/tuple'), 
+      changeset = require('../dataflow/changeset'), 
+      meas = require('./measures'),
+      util = require('../util/index'),
+      C = require('../util/constants');
+
+  function Stats(graph) {
+    Aggregate.prototype.init.call(this, graph);
+    Transform.addParameters(this, {
+      group_by: {type: "array<field>"},
+      on: {type: "field"} 
+    });
+
+    this._output = {
+      "count":    "count",
+      "avg":      "avg",
+      "min":      "min",
+      "max":      "max",
+      "sum":      "sum",
+      "mean":     "mean",
+      "var":      "var",
+      "stdev":    "stdev",
+      "varp":     "varp",
+      "stdevp":   "stdevp",
+      "median":   "median"
+    };
+
+    // Measures parameter handled manually.
+    this._Measures = null;
+
+    // The group_by might come via the facet. Store that to 
+    // short-circuit usual Aggregate methods.
+    this.__facet = null;
+
+    return this;
+  }
+
+  var proto = (Stats.prototype = new Aggregate());
+
+  proto.measures = { 
+    set: function(transform, aggs) {
+      if(aggs.indexOf(C.COUNT) < 0) aggs.push(C.COUNT); // Need count for correct Aggregate propagation.
+      transform._Measures = meas.create(aggs.map(function(a) { 
+        return meas[a](transform._output[a]); 
+      }));
+      return transform;
+    }
+  };
+
+  proto._reset = function(input, output) {
+    var k, c
+    for(k in this._cells) { 
+      if(!(c = this._cells[k])) continue;
+      if(!input.facet) output.rem.push(c.set());
+    }
+    this._cells = {};
+  };
+
+  proto._keys = function(x) {
+    if(this.__facet) return this.__facet;
+    else if(this._refs.length) return Aggregate.prototype._keys.call(this, x);
+    return {keys: [], key: ""}; // Stats on a flat datasource
+  };
+
+  proto._new_cell = function(x, k) {
+    var cell = this.__facet || tuple.create(x, x._prev);
+    return new this._Measures(cell);
+  };
+
+  proto._add = function(x) {
+    var field = this.on.get(this._graph).accessor;
+    this._cell(x).add(field(x));
+  };
+
+  proto._rem = function(x) {
+    var field = this.on.get(this._graph).accessor;
+    this._cell(x).rem(field(x));
+  };
+
+  proto.transform = function(input, reset) {
+    util.debug(input, ["stats"]);
+
+    if(input.facet) {
+      this.__facet = input.facet;
+    } else {
+      this._refs = this.group_by.get(this._graph).accessors;
+    }
+
+    var output = Aggregate.prototype.transform.call(this, input, reset),
+        k, c;
+
+    if(input.facet) {
+      this._cells[input.facet.key].set();
+      return input;
+    } else {
+      for(k in this._cells) {
+        c = this._cells[k];
+        if(!c) continue;
+        c.set();
+      }
+      return output;
+    }
+  };
+
+  return Stats;
+});
+define('transforms/Unique',['require','exports','module','./Transform','./Aggregate','../dataflow/tuple','../util/index'],function(require, exports, module) {
+  var Transform = require('./Transform'),
+      Aggregate = require('./Aggregate'),
+      tuple = require('../dataflow/tuple'),
+      util = require('../util/index');
+
+  function Unique(graph) {
+    Aggregate.prototype.init.call(this, graph);
+    Transform.addParameters(this, {
+      on: {type: "field"},
+      as: {type: "value"}
+    });
+
+    return this;
+  }
+
+  var proto = (Unique.prototype = new Aggregate());
+
+  proto._new_tuple = function(x) {
+    var o  = {},
+        on = this.on.get(this._graph),
+        as = this.as.get(this._graph);
+
+    o[as] = on.accessor(x);
+    return tuple.create(o, null);
+  };
+
+  proto.transform = function(input, reset) {
+    util.debug(input, ["uniques"]);
+    this._refs = [this.on.get(this._graph).accessor];
+    return Aggregate.prototype.transform.call(this, input, reset);
+  };
+
+  return Unique;
+});
 define('transforms/Zip',['require','exports','module','./Transform','../dataflow/Collector','../util/index'],function(require, exports, module) {
   var Transform = require('./Transform'),
       Collector = require('../dataflow/Collector'),
@@ -3752,7 +3966,7 @@ define('transforms/Zip',['require','exports','module','./Transform','../dataflow
     this._collector = new Collector(graph);
     this._lastJoin = 0;
 
-    return this;
+    return this.needsPrev(true);
   }
 
   var proto = (Zip.prototype = new Transform());
@@ -3791,11 +4005,9 @@ define('transforms/Zip',['require','exports','module','./Transform','../dataflow
         // Other field updates will auto-propagate via prototype.
         if(woutput.fields[withKey.field]) {
           woutput.mod.forEach(function(x) {
-            var prev = withKey.accessor(x._prev);
-            if(!prev) return;
-            if(prev.stamp < this._lastJoin) return; // Only process new key updates
-
-            var prevm = map(prev.value);
+            var prev;
+            if(!x._prev || (prev = withKey.accessor(x._prev)) === undefined) return;
+            var prevm = map(prev);
             if(prevm[0]) prevm[0][as] = dflt;
             prevm[1] = null;
 
@@ -3817,11 +4029,10 @@ define('transforms/Zip',['require','exports','module','./Transform','../dataflow
 
       if(input.fields[key.field]) {
         input.mod.forEach(function(x) {
-          var prev = key.accessor(x._prev);
-          if(!prev) return;
-          if(prev.stamp < input.stamp) return; // Only process new key updates
+          var prev;
+          if(!x._prev || (prev = key.accessor(x._prev)) === undefined) return;
 
-          map(prev.value)[0] = null;
+          map(prev)[0] = null;
           var m = map(key.accessor(x));
           x[as] = m[1] || dflt;
           m[0]  = x;
@@ -3848,15 +4059,16 @@ define('transforms/Zip',['require','exports','module','./Transform','../dataflow
 
   return Zip;
 });
-define('transforms/index',['require','exports','module','./Aggregate','./Bin','./Facet','./Filter','./Fold','./Formula','./Sort','./Zip'],function(require, exports, module) {
+define('transforms/index',['require','exports','module','./Bin','./Facet','./Filter','./Fold','./Formula','./Sort','./Stats','./Unique','./Zip'],function(require, exports, module) {
   return {
-    aggregate:  require('./Aggregate'),
     bin:        require('./Bin'),
     facet:      require('./Facet'),
     filter:     require('./Filter'),
     fold:       require('./Fold'),
     formula:    require('./Formula'),
     sort:       require('./Sort'),
+    stats:      require('./Stats'),
+    unique:     require('./Unique'),
     zip:        require('./Zip')
   };
 });
@@ -3872,8 +4084,12 @@ define('parse/transforms',['require','exports','module','../util/index','../tran
       tx.pipeline(pipeline);
     }
 
+    // We want to rename output fields before setting any other properties,
+    // as subsequent properties may require output to be set (e.g. aggregate).
+    if(def.output) tx.output(def.output);
+
     util.keys(def).forEach(function(k) {
-      if(k === 'type') return;
+      if(k === 'type' || k === 'output') return;
       if(k === 'transform' && def.type === 'facet') return;
       (tx[k]).set(tx, def[k]);
     });
@@ -3917,6 +4133,7 @@ define('parse/modify',['require','exports','module','../dataflow/Node','../dataf
       var datum = {}, 
           value = signal ? graph.signalRef(def.signal) : null,
           d = model.data(ds.name),
+          prev = d.needsPrev() ? null : undefined,
           t = null;
 
       datum[def.field] = value;
@@ -3925,7 +4142,7 @@ define('parse/modify',['require','exports','module','../dataflow/Node','../dataf
       // our dynamic data. W/o modifying ds._data, only the output
       // collector will contain dynamic tuples. 
       if(def.type == C.ADD) {
-        t = tuple.create(datum);
+        t = tuple.create(datum, prev);
         input.add.push(t);
         d._data.push(t);
       } else if(def.type == C.REMOVE) {
@@ -4156,7 +4373,10 @@ define('parse/data',['require','exports','module','./transforms','./modify','../
     if(d.values) ds.values(read(d.values, d.format));
     else if(d.source) {
       ds.source(d.source);
+
+      // The derived datasource will be pulsed by its src rather than the model.
       model.data(d.source).addListener(ds);
+      model.removeListener(ds._pipeline[0]); 
     }
 
     return ds;    
@@ -4182,7 +4402,7 @@ define('scene/Builder',['require','exports','module','../dataflow/Node','../data
 
   var proto = (Builder.prototype = new Node());
 
-  proto.init = function(model, renderer, def, mark, parent, inheritFrom) {
+  proto.init = function(model, renderer, def, mark, parent, parent_id, inheritFrom) {
     Node.prototype.init.call(this, model.graph)
       .router(true)
       .collector(true);
@@ -4194,16 +4414,19 @@ define('scene/Builder',['require','exports','module','../dataflow/Node','../data
     this._ds    = util.isString(this._from) ? model.data(this._from) : null;
     this._map   = {};
     this._items = [];
-    this._lastBuild = 0;
 
     mark.def = def;
     mark.marktype = def.type;
     mark.interactive = !(def.interactive === false);
     mark.items = this._items;
 
-    if(def.from && (def.from.transform || def.from.modify)) inlineDs.call(this);
-
     this._parent = parent;
+    this._parent_id = parent_id;
+
+    if(def.from && (def.from.mark || def.from.transform || def.from.modify)) {
+      inlineDs.call(this);
+    }
+
     this._encoder = new Encoder(this._model, this._mark);
     this._bounder = new Bounder(this._model, this._mark);
     this._collector = new Collector(this._model.graph);
@@ -4232,9 +4455,8 @@ define('scene/Builder',['require','exports','module','../dataflow/Node','../data
 
       fcs = this._ds.last();
       if(!fcs) return (output.reflow = true, output);
-      if(fcs.stamp <= this._lastBuild) return output;
+      if(fcs.stamp <= this._stamp) return output;
 
-      this._lastBuild = fcs.stamp;
       return joinChangeset.call(this, fcs);
     } else {
       data = util.isFunction(this._def.from) ? this._def.from() : [C.SENTINEL];
@@ -4242,33 +4464,51 @@ define('scene/Builder',['require','exports','module','../dataflow/Node','../data
     }
   };
 
-  // Mark-level transformations are handled here because they may be
-  // inheriting from a group's faceted datasource. 
+  // Reactive geometry and mark-level transformations are handled here 
+  // because they need their group's data-joined context. 
   function inlineDs() {
-    var name = [this._from, this._def.type, Date.now()].join('_');
-    var spec = {
-      name: name,
-      source: this._from,
-      transform: this._def.from.transform,
-      modify: this._def.from.modify
-    };
+    var from = this._def.from,
+        name, spec, sibling, output;
+
+    if(from.mark) {
+      name = ["vg", this._parent_id, from.mark].join("_");
+      spec = {
+        name: name,
+        transform: from.transform, 
+        modify: from.modify
+      };
+    } else {
+      name = ["vg", this._from, this._def.type, Date.now()].join("_");
+      spec = {
+        name: name,
+        source: this._from,
+        transform: from.transform,
+        modify: from.modify
+      };
+    }
 
     this._from = name;
     this._ds = parseData.datasource(this._model, spec);
 
-    // At this point, we have a new datasource but it is empty as
-    // the propagation cycle has already crossed the datasources. 
-    // So, we repulse just this datasource. This should be safe
-    // as the ds isn't connected to the scenegraph yet.
-    var output = this._ds.source().last(),
-        input  = changeset.create(output);
+    if(from.mark) {
+      sibling = this.sibling(from.mark);
+      sibling._bounder.addListener(this._ds.listener());
+    } else {
+      // At this point, we have a new datasource but it is empty as
+      // the propagation cycle has already crossed the datasources. 
+      // So, we repulse just this datasource. This should be safe
+      // as the ds isn't connected to the scenegraph yet.
+      
+      var output = this._ds.source().last();
+          input  = changeset.create(output);
 
-    input.add = output.add;
-    input.mod = output.mod;
-    input.rem = output.rem;
-    input.stamp = null;
-    this._ds.fire(input);
-  };
+      input.add = output.add;
+      input.mod = output.mod;
+      input.rem = output.rem;
+      input.stamp = null;
+      this._ds.fire(input);
+    }
+  }
 
   proto._pipeline = function() {
     return [this, this._encoder, this._collector, this._bounder, this._renderer];
@@ -4293,13 +4533,17 @@ define('scene/Builder',['require','exports','module','../dataflow/Node','../data
     return this;
   };
 
+  proto.sibling = function(name) {
+    return this._parent.child(name, this._parent_id);
+  };
+
   function newItem(d, stamp) {
     var item   = tuple.create(new Item(this._mark));
     item.datum = d;
 
     // For the root node's item
-    if(this._def.width)  tuple.set(item, "width",  this._def.width, stamp);
-    if(this._def.height) tuple.set(item, "height", this._def.height, stamp);
+    if(this._def.width)  tuple.set(item, "width",  this._def.width);
+    if(this._def.height) tuple.set(item, "height", this._def.height);
 
     return item;
   };
@@ -4316,7 +4560,7 @@ define('scene/Builder',['require','exports','module','../dataflow/Node','../data
     for(i=0, len=add.length; i<len; ++i) {
       key = keyf(datum = add[i]);
       item = newItem.call(this, datum, stamp);
-      tuple.set(item, "key", key, stamp);
+      tuple.set(item, "key", key);
       item.status = C.ENTER;
       this._map[key] = item;
       this._items.push(item);
@@ -4325,7 +4569,7 @@ define('scene/Builder',['require','exports','module','../dataflow/Node','../data
 
     for(i=0, len=mod.length; i<len; ++i) {
       item = this._map[key = keyf(datum = mod[i])];
-      tuple.set(item, "key", key, stamp);
+      tuple.set(item, "key", key);
       item.datum  = datum;
       item.status = C.UPDATE;
       output.mod.push(item);
@@ -4403,54 +4647,91 @@ define('scene/Builder',['require','exports','module','../dataflow/Node','../data
 
   return Builder;
 });
-define('parse/scale',['require','exports','module','d3','../util/config','../util/index','../util/constants'],function(require, module, exports) {
+define('scene/Scale',['require','exports','module','d3','../dataflow/Node','../transforms/Stats','../dataflow/changeset','../util/index','../util/config','../util/constants'],function(require, exports, module) {
   var d3 = require('d3'),
-      config = require('../util/config'),
+      Node = require('../dataflow/Node'),
+      Stats = require('../transforms/Stats'),
+      changeset = require('../dataflow/changeset'),
       util = require('../util/index'),
+      config = require('../util/config'),
       C = require('../util/constants');
 
-  var LINEAR = C.LINEAR,
-      ORDINAL = C.ORDINAL,
-      LOG = C.LOG,
-      POWER = C.POWER,
-      TIME = C.TIME,
-      QUANTILE = C.QUANTILE,
-      GROUP_PROPERTY = {width: 1, height: 1};
+  var GROUP_PROPERTY = {width: 1, height: 1};
 
-  function scale(model, def, group) {
-    var s = instance(def, group.scale(def.name)),
-        m = s.type===ORDINAL ? ordinal : quantitative,
-        rng = range(model, def, group),
-        data = util.values(group.datum);
+  function Scale(model, def, parent) {
+    this._model = model;
+    this._def = def;
+    this._parent = parent;
+    return Node.prototype.init.call(this, model.graph);
+  }
 
-    m(model, def, s, rng, data);
+  var proto = (Scale.prototype = new Node());
+
+  proto.evaluate = function(input) {
+    var self = this,
+        fn = function(group) { scale.call(self, group); };
+
+    input.add.forEach(fn);
+    input.mod.forEach(fn);
+
+    // Scales are at the end of an encoding pipeline, so they should forward a
+    // reflow pulse. Thus, if multiple scales update in the parent group, we don't
+    // reevaluate child marks multiple times. 
+    return changeset.create(input, true);
+  };
+
+  // All of a scale's dependencies are registered during propagation as we parse
+  // dataRefs. So a scale must be responsible for connecting itself to dependents.
+  proto.dependency = function(type, deps) {
+    if(arguments.length == 2) {
+      deps = util.array(deps);
+      for(var i=0, len=deps.length; i<len; ++i) {
+        this._graph[type == C.DATA ? C.DATA : C.SIGNAL](deps[i])
+          .addListener(this._parent);
+      }
+    }
+
+    return Node.prototype.dependency.call(this, type, deps);
+  };
+
+  function scale(group) {
+    var name = this._def.name,
+        prev = name + ":prev",
+        s = instance.call(this, group.scale(name)),
+        m = s.type===C.ORDINAL ? ordinal : quantitative,
+        rng = range.call(this, group);
+
+    m.call(this, s, rng, group);
+
+    group.scale(name, s);
+    group.scale(prev, group.scale(prev) || s);
+
     return s;
   }
 
-  function instance(def, scale) {
-    var type = def.type || LINEAR;
+  function instance(scale) {
+    var type = this._def.type || C.LINEAR;
     if (!scale || type !== scale.type) {
       var ctor = config.scale[type] || d3.scale[type];
       if (!ctor) util.error("Unrecognized scale type: " + type);
       (scale = ctor()).type = scale.type || type;
-      scale.scaleName = def.name;
+      scale.scaleName = this._def.name;
     }
     return scale;
   }
 
-  function ordinal(model, def, scale, rng, data) {
-    var domain, sort, str, refs, dataDrivenRange = false;
+  function ordinal(scale, rng, group) {
+    var def = this._def,
+        domain, sort, str, refs, dataDrivenRange = false;
     
     // range pre-processing for data-driven ranges
     if (util.isObject(def.range) && !util.isArray(def.range)) {
       dataDrivenRange = true;
-      refs = def.range.fields || util.array(def.range);
-      rng = extract(model, refs, data);
+      rng = dataRef.call(this, C.RANGE, def.range, scale, group);
     }
     
     // domain
-    sort = def.sort && !dataDrivenRange;
-    domain = domainValues(model, def, data, sort);
+    domain = dataRef.call(this, C.DOMAIN, def.domain, scale, group);
     if (domain) scale.domain(domain);
 
     // range
@@ -4466,13 +4747,14 @@ define('parse/scale',['require','exports','module','d3','../util/config','../uti
     }
   }
 
-  function quantitative(model, def, scale, rng, data) {
-    var domain, interval;
+  function quantitative(scale, rng, group) {
+    var def = this._def,
+        domain, interval;
 
     // domain
-    domain = (def.type === QUANTILE)
-      ? domainValues(model, def, data, false)
-      : domainMinMax(model, def, data);
+    domain = (def.type === C.QUANTILE)
+      ? dataRef.call(this, C.DOMAIN, def.domain, scale, group)
+      : domainMinMax.call(this, scale, group);
     scale.domain(domain);
 
     // range
@@ -4480,10 +4762,10 @@ define('parse/scale',['require','exports','module','d3','../util/config','../uti
     if (def.range === "height") rng = rng.reverse();
     scale[def.round && scale.rangeRound ? "rangeRound" : "range"](rng);
 
-    if (def.exponent && def.type===POWER) scale.exponent(def.exponent);
+    if (def.exponent && def.type===C.POWER) scale.exponent(def.exponent);
     if (def.clamp) scale.clamp(true);
     if (def.nice) {
-      if (def.type === TIME) {
+      if (def.type === C.TIME) {
         interval = d3.time[def.nice];
         if (!interval) util.error("Unrecognized interval: " + interval);
         scale.nice(interval);
@@ -4492,70 +4774,96 @@ define('parse/scale',['require','exports','module','d3','../util/config','../uti
       }
     }
   }
-  
-  function extract(model, refs, data) {
-    return refs.reduce(function(values, r) {        
-      var dat = util.values(model.data(r.data) || data),
-          get = util.accessor(util.isString(r.field)
-              ? r.field : "data." + util.accessor(r.field.group)(data));
-      return util.unique(dat, get, values);
-    }, []);
+
+  function dataRef(which, def, scale, group) {
+    if(util.isArray(def)) return def.map(signal.bind(this));
+
+    var self = this, graph = this._graph,
+        refs = def.fields || util.array(def),
+        uniques = scale.type === C.ORDINAL || scale.type === C.QUANTILE,
+        ck = "_"+which,
+        cache = scale[ck],
+        sort = def.sort,
+        i, rlen, j, flen, r, fields, meas, from, data, keys;
+
+    if(!cache) {
+      cache = scale[ck] = new Stats(graph), meas = [];
+      if(uniques && sort) meas.push(sort.stat);
+      else if(!uniques) meas.push(C.MIN, C.MAX);
+      cache.measures.set(cache, meas);
+    }
+
+    for(i=0, rlen=refs.length; i<rlen; ++i) {
+      r = refs[i];
+      from = r.data || "vg_"+group.datum._id;
+      data = graph.data(from)
+        .needsPrev(true)
+        .last();
+
+      if(data.stamp <= this._stamp) continue;
+
+      fields = util.array(r.field).map(function(f) {
+        if(f.group) return util.accessor(f.group)(group.datum)
+        return f; // String or {"signal"}
+      });
+
+      if(uniques) {
+        cache.on.set(cache, sort ? sort.field : "_id");
+        for(j=0, flen=fields.length; j<flen; ++j) {
+          cache.group_by.set(cache, fields[j])
+            .evaluate(data);
+        }
+      } else {
+        for(j=0, flen=fields.length; j<flen; ++j) {
+          cache.on.set(cache, fields[j])  // Treat as flat datasource
+            .evaluate(data);
+        }
+      }
+
+      this.dependency(C.DATA, from);
+      cache.dependency(C.SIGNALS).forEach(function(s) { self.dependency(C.SIGNALS, s) });
+    }
+
+    data = cache.data();
+    if(uniques) {
+      keys = util.keys(data).filter(function(k) { return data[k] != null; });
+      if(sort) {
+        sort = sort.order.signal ? graph.signalRef(sort.order.signal) : sort.order;
+        sort = (sort == C.DESC ? "-" : "+") + cache.on.get(graph).field;
+        sort = util.comparator(sort);
+        return keys.map(function(k) { return data[k] }).sort(sort);
+      } else {
+        return keys;
+      }
+    } else {
+      data = data[""]; // Unpack flat aggregation
+      return data == null ? [] : [data.tpl.min, data.tpl.max];
+    }
   }
 
-  function signal(model, v) {
-    if(!v.signal) return v;
-    return model.graph.signalRef(v.signal);
+  function signal(v) {
+    var s = v.signal, ref;
+    if(!s) return v;
+    this.dependency(C.SIGNALS, (ref = util.field(s))[0]);
+    return this._graph.signalRef(ref);
   }
-  
-  function domainValues(model, def, data, sort) {
-    var domain = def.domain, values, refs;
-    if (util.isArray(domain)) {
-      values = sort ? domain.slice() : domain;
-      values = values.map(signal.bind(null, model));
-    } else if (util.isObject(domain)) {
-      refs = domain.fields || util.array(domain);
-      values = extract(model, refs, data);
-    }
-    if (values && sort) values.sort(util.cmp);
-    return values;
-  }
-  
-  function domainMinMax(model, def, data) {
-    var domain = [null, null], refs, z;
-    
-    function extract(ref, min, max, z) {
-      var dat = util.values(model.data(ref.data) || data);
-      var fields = util.array(ref.field).map(function(f) {
-        return util.isString(f) ? f
-          : "data." + util.accessor(f.group)(data);
-      });
-      
-      fields.forEach(function(f,i) {
-        f = util.accessor(f);
-        if (min) domain[0] = d3.min([domain[0], d3.min(dat, f)]);
-        if (max) domain[z] = d3.max([domain[z], d3.max(dat, f)]);
-      });
-    }
+
+  function domainMinMax(scale, group) {
+    var def = this._def,
+        domain = [null, null], refs, z;
 
     if (def.domain !== undefined) {
-      if (util.isArray(def.domain)) {
-        domain = def.domain.slice().map(signal.bind(null, model));
-      } else if (util.isObject(def.domain)) {
-        refs = def.domain.fields || util.array(def.domain);
-        refs.forEach(function(r) { extract(r,1,1,1); });
-      } else {
-        domain = def.domain;
-      }
+      domain = (!util.isObject(def.domain)) ? domain :
+        dataRef.call(this, C.DOMAIN, def.domain, scale, group);
     }
+
     z = domain.length - 1;
     if (def.domainMin !== undefined) {
       if (util.isObject(def.domainMin)) {
         if(def.domainMin.signal) {
-          domain[0] = signal(model, def.domainMin);
+          domain[0] = signal.call(this, def.domainMin);
         } else {
-          domain[0] = null;
-          refs = def.domainMin.fields || util.array(def.domainMin);
-          refs.forEach(function(r) { extract(r,1,0,z); });
+          domain[0] = dataRef.call(this, C.DOMAIN+C.MIN, def.domainMin, scale, group)[0];
         }
       } else {
         domain[0] = def.domainMin;
@@ -4564,25 +4872,24 @@ define('parse/scale',['require','exports','module','d3','../util/config','../uti
     if (def.domainMax !== undefined) {
       if (util.isObject(def.domainMax)) {
         if(def.domainMax.signal) {
-          domain[z] = signal(model, def.domainMax);
+          domain[z] = signal.call(this, def.domainMax);
         } else {
-          domain[z] = null;
-          refs = def.domainMax.fields || util.array(def.domainMax);
-          refs.forEach(function(r) { extract(r,0,1,z); });
+          domain[z] = dataRef.call(this, C.DOMAIN+C.MAX, def.domainMax, scale, group)[1];
         }
       } else {
         domain[z] = def.domainMax;
       }
     }
-    if (def.type !== LOG && def.type !== TIME && (def.zero || def.zero===undefined)) {
+    if (def.type !== C.LOG && def.type !== C.TIME && (def.zero || def.zero===undefined)) {
       domain[0] = Math.min(0, domain[0]);
       domain[z] = Math.max(0, domain[z]);
     }
     return domain;
   }
 
-  function range(model, def, group) {
-    var rng = [null, null];
+  function range(group) {
+    var def = this._def,
+        rng = [null, null];
 
     if (def.range !== undefined) {
       if (typeof def.range === 'string') {
@@ -4595,7 +4902,7 @@ define('parse/scale',['require','exports','module','d3','../util/config','../uti
           return rng;
         }
       } else if (util.isArray(def.range)) {
-        rng = def.range.map(signal.bind(null, model));
+        rng = def.range.map(signal.bind(this));
       } else if (util.isObject(def.range)) {
         return null; // early exit
       } else {
@@ -4603,10 +4910,10 @@ define('parse/scale',['require','exports','module','d3','../util/config','../uti
       }
     }
     if (def.rangeMin !== undefined) {
-      rng[0] = def.rangeMin.signal ? signal(model, def.rangeMin) : def.rangeMin;
+      rng[0] = def.rangeMin.signal ? signal.call(this, def.rangeMin) : def.rangeMin;
     }
     if (def.rangeMax !== undefined) {
-      rng[rng.length-1] = def.rangeMax.signal ? signal(model, def.rangeMax) : def.rangeMax;
+      rng[rng.length-1] = def.rangeMax.signal ? signal.call(this, def.rangeMax) : def.rangeMax;
     }
     
     if (def.reverse !== undefined) {
@@ -4620,87 +4927,7 @@ define('parse/scale',['require','exports','module','d3','../util/config','../uti
     return rng;
   }
 
-  return scale;
-});
-
-define('scene/scale',['require','exports','module','../dataflow/Node','../parse/scale','../util/index','../dataflow/changeset'],function(require, exports, module) {
-  var Node = require('../dataflow/Node'),
-      parseScale = require('../parse/scale'), 
-      util = require('../util/index'),
-      changeset = require('../dataflow/changeset');
-
-  var ORDINAL = "ordinal";
-
-  return function scale(model, def) {
-    var domain = def.domain||{}; // TODO: support all domain types
-
-    function signals() {
-      var signals = [];
-
-      ['domain', 'range'].forEach(function(t) {
-        if(util.isArray(def[t])) {
-          def[t].forEach(function(v) { if(v.signal) signals.push(v.signal); });
-        }
-        if(def[t+'Min'] && def[t+'Min'].signal) signals.push(def[t+'Min'].signal);
-        if(def[t+'Max'] && def[t+'Max'].signal) signals.push(def[t+'Max'].signal);
-      });
-
-      return signals.map(function(s) { return util.field(s)[0]; });
-    }
-
-    function reeval(group, input) {
-      var from = model.data(domain.data || "vg_"+group.datum._id),
-          fcs = from ? from.last() : null,
-          prev = group._prev || {},
-          width = prev.width || {}, height = prev.height || {}, 
-          reeval = fcs ? !!fcs.add.length || !!fcs.rem.length : false;
-
-      if(domain.field) reeval = reeval || fcs.fields[domain.field];
-      reeval = reeval || fcs ? !!fcs.sort && def.type === ORDINAL : false;
-      reeval = reeval || node.reevaluate(input);
-      reeval = reeval || def.range == 'width'  && width.stamp  == input.stamp;
-      reeval = reeval || def.range == 'height' && height.stamp == input.stamp;
-
-      input.scales[def.name] = 1;
-      return reeval;
-    }
-
-    function scale(group) {
-      util.debug({}, ["rescaling", group.datum._id]);
-
-      var k = def.name, 
-          scale = parseScale(model, def, group);
-
-      group.scale(k+":prev", group.scale(k) || scale);
-      group.scale(k, scale);
-
-      var deps = node._deps.data, 
-          inherit = domain.data ? false : "vg_"+group.datum._id;
-
-      if(inherit && deps.indexOf(inherit) === -1) deps.push(inherit);
-    }
-
-    var node = new Node(model.graph);
-    node.evaluate = function scaling(input) {
-      util.debug(input, ["scaling", def.name]);
-
-      input.add.forEach(scale);
-      input.mod.forEach(function(group) {
-        if(reeval(group, input)) scale(group);
-      });
-
-      // Scales are at the end of an encoding pipeline, so they should forward a
-      // reflow pulse. Thus, if multiple scales update in the parent group, we don't
-      // reevaluate child marks multiple times. 
-      return changeset.create(input, true);
-    };
-
-    if(domain.data) node._deps.data.push(domain.data);
-    if(domain.field) node._deps.fields.push(domain.field);
-    node._deps.signals = signals();
-
-    return node;
-  };
+  return Scale;
 });
 define('parse/properties',['require','exports','module','../dataflow/tuple','../util/index','../util/config'],function(require, exports, module) {
   var tuple = require('../dataflow/tuple'),
@@ -4727,7 +4954,7 @@ define('parse/properties',['require','exports','module','../dataflow/tuple','../
         code += "\n  " + ref.code
       } else {
         ref = valueRef(name, ref);
-        code += "this.tpl.set(o, "+util.str(name)+", "+ref.val+", stamp);";
+        code += "this.tpl.set(o, "+util.str(name)+", "+ref.val+");";
       }
 
       vars[name] = true;
@@ -4740,14 +4967,14 @@ define('parse/properties',['require','exports','module','../dataflow/tuple','../
       if (vars.x) {
         code += "\n  if (o.x > o.x2) { "
               + "var t = o.x;"
-              + "this.tpl.set(o, 'x', o.x2, stamp);"
-              + "this.tpl.set(o, 'x2', t, stamp); "
+              + "this.tpl.set(o, 'x', o.x2);"
+              + "this.tpl.set(o, 'x2', t); "
               + "};";
-        code += "\n  this.tpl.set(o, 'width', (o.x2 - o.x), stamp);";
+        code += "\n  this.tpl.set(o, 'width', (o.x2 - o.x));";
       } else if (vars.width) {
-        code += "\n  this.tpl.set(o, 'x', (o.x2 - o.width), stamp);";
+        code += "\n  this.tpl.set(o, 'x', (o.x2 - o.width));";
       } else {
-        code += "\n  this.tpl.set(o, 'x', o.x2, stamp);"
+        code += "\n  this.tpl.set(o, 'x', o.x2);"
       }
     }
 
@@ -4755,14 +4982,14 @@ define('parse/properties',['require','exports','module','../dataflow/tuple','../
       if (vars.y) {
         code += "\n  if (o.y > o.y2) { "
               + "var t = o.y;"
-              + "this.tpl.set(o, 'y', o.y2, stamp);"
-              + "this.tpl.set(o, 'y2', t, stamp);"
+              + "this.tpl.set(o, 'y', o.y2);"
+              + "this.tpl.set(o, 'y2', t);"
               + "};";
-        code += "\n  this.tpl.set(o, 'height', (o.y2 - o.y), stamp);";
+        code += "\n  this.tpl.set(o, 'height', (o.y2 - o.y));";
       } else if (vars.height) {
-        code += "\n  this.tpl.set(o, 'y', (o.y2 - o.height), stamp);";
+        code += "\n  this.tpl.set(o, 'y', (o.y2 - o.height));";
       } else {
-        code += "\n  this.tpl.set(o, 'y', o.y2, stamp);"
+        code += "\n  this.tpl.set(o, 'y', o.y2);"
       }
     }
     
@@ -4770,9 +4997,10 @@ define('parse/properties',['require','exports','module','../dataflow/tuple','../
     code += "\n  if (trans) trans.interpolate(item, o);";
 
     try {
-      var encoder = Function("stamp", "item", "group", "trans", 
-        "db", "signals", "predicates", code);
+      var encoder = Function("item", "group", "trans", "db", 
+        "signals", "predicates", code);
       encoder.tpl = tuple;
+      encoder.util = util;
       return {
         encode: encoder,
         signals: util.keys(deps.signals),
@@ -4826,11 +5054,11 @@ define('parse/properties',['require','exports','module','../dataflow/tuple','../
         db.push.apply(db, pred.data);
         inputs.push(args+" = {"+input.join(', ')+"}");
         code += "if(predicates["+util.str(predName)+"]("+args+", db, signals, predicates)) {\n" +
-          "    this.tpl.set(o, "+util.str(name)+", "+ref.val+", stamp);\n";
+          "    this.tpl.set(o, "+util.str(name)+", "+ref.val+");\n";
         code += rules[i+1] ? "  } else " : "  }";
       } else {
         code += "{\n" + 
-          "    this.tpl.set(o, "+util.str(name)+", "+ref.val+", stamp);\n"+
+          "    this.tpl.set(o, "+util.str(name)+", "+ref.val+");\n"+
           "  }";
       }
     });
@@ -4882,9 +5110,9 @@ define('parse/properties',['require','exports','module','../dataflow/tuple','../
     if (ref.field != null) {
       if (util.isString(ref.field)) {
         val = "item.datum["+util.field(ref.field).map(util.str).join("][")+"]";
-        if (ref.group != null) { val = "this.accessor("+val+")("+grp+")"; }
+        if (ref.group != null) { val = "this.util.accessor("+val+")("+grp+")"; }
       } else {
-        val = "this.accessor(group.datum["
+        val = "this.util.accessor(group.datum["
             + util.field(ref.field.group).map(util.str).join("][")
             + "])(item.datum.data)";
       }
@@ -5380,7 +5608,7 @@ define('scene/axis',['require','exports','module','../util/config','../dataflow/
     domain.properties.update.path = {value: path};
   }
 
-  function vg_axisUpdate(stamp, item, group, trans, db, signals, predicates) {
+  function vg_axisUpdate(item, group, trans, db, signals, predicates) {
     var o = trans ? {} : item,
         offset = item.mark.def.offset,
         orient = item.mark.def.orient,
@@ -5568,10 +5796,10 @@ define('parse/axes',['require','exports','module','../scene/axis','../util/confi
   return axes;
 });
 
-define('scene/GroupBuilder',['require','exports','module','../dataflow/Node','./Builder','./scale','../parse/axes','../util/index','../util/constants'],function(require, exports, module) {
+define('scene/GroupBuilder',['require','exports','module','../dataflow/Node','./Builder','./Scale','../parse/axes','../util/index','../util/constants'],function(require, exports, module) {
   var Node = require('../dataflow/Node'),
       Builder = require('./Builder'),
-      scalefn = require('./scale'),
+      Scale = require('./Scale'),
       parseAxes = require('../parse/axes'),
       util = require('../util/index'),
       C = require('../util/constants');
@@ -5588,15 +5816,13 @@ define('scene/GroupBuilder',['require','exports','module','../dataflow/Node','./
 
   var proto = (GroupBuilder.prototype = new Builder());
 
-  proto.init = function(model, renderer, def, mark, parent, inheritFrom) {
+  proto.init = function(model, renderer, def, mark, parent, parent_id, inheritFrom) {
     var builder = this;
 
     this._scaler = new Node(model.graph);
 
     (def.scales||[]).forEach(function(s) { 
-      s = builder.scale(s.name, scalefn(model, s));
-      s.dependency(C.DATA).forEach(function(d) { model.data(d).addListener(builder); });
-      s.dependency(C.SIGNALS).forEach(function(s) { model.graph.signal(s).addListener(builder); });
+      s = builder.scale(s.name, new Scale(model, s, builder));
       builder._scaler.addListener(s);  // Scales should be computed after group is encoded
     });
 
@@ -5609,6 +5835,14 @@ define('scene/GroupBuilder',['require','exports','module','../dataflow/Node','./
     this._recursor.dependency(C.SCALES, util.keys(scales));
 
     return Builder.prototype.init.apply(this, arguments);
+  };
+
+  proto.evaluate = function(input) {
+    var output = Builder.prototype.evaluate.apply(this, arguments),
+        builder = this;
+
+    output.add.forEach(function(group) { buildGroup.call(builder, output, group); });
+    return output;
   };
 
   proto._pipeline = function() {
@@ -5628,12 +5862,17 @@ define('scene/GroupBuilder',['require','exports','module','../dataflow/Node','./
     return Builder.prototype.disconnect.call(this);
   };
 
-  proto.evaluate = function(input) {
-    var output = Builder.prototype.evaluate.apply(this, arguments),
-        builder = this;
+  proto.child = function(name, group_id) {
+    var children = this._children[group_id],
+        i = 0, len = children.length,
+        child;
 
-    output.add.forEach(function(group) { buildGroup.call(builder, output, group); });
-    return output;
+    for(; i<len; ++i) {
+      child = children[i];
+      if(child.type == C.MARK && child.builder._def.name == name) break;
+    }
+
+    return child.builder;
   };
 
   function recurse(input) {
@@ -5696,20 +5935,21 @@ define('scene/GroupBuilder',['require','exports','module','../dataflow/Node','./
   function buildMarks(input, group) {
     util.debug(input, ["building marks", this._def.marks]);
     var marks = this._def.marks,
-        mark, inherit, i, len, m, b;
+        mark, from, inherit, i, len, m, b;
 
     for(i=0, len=marks.length; i<len; ++i) {
       mark = marks[i];
+      from = mark.from || {};
       inherit = "vg_"+group.datum._id;
       group.items[i] = {group: group};
       b = (mark.type === C.GROUP) ? new GroupBuilder() : new Builder();
-      b.init(this._model, this._renderer, mark, group.items[i], this, inherit);
+      b.init(this._model, this._renderer, mark, group.items[i], this, group._id, inherit);
 
       // Temporary connection to propagate initial pulse. 
       this._recursor.addListener(b);
       this._children[group._id].push({ 
         builder: b, 
-        from: ((mark.from||{}).data) || inherit, 
+        from: from.data || from.mark ? ("vg_" + group._id + "_" + from.mark) : inherit, 
         type: C.MARK 
       });
     }
@@ -8429,10 +8669,10 @@ define('scene/Transition',['require','exports','module','../dataflow/tuple','../
       if (curr !== next) {
         if (skip[key] || curr === undefined) {
           // skip interpolation for specific keys or undefined start values
-          tuple.set(item, key, next, stamp);
+          tuple.set(item, key, next);
         } else if (typeof curr === "number" && !isFinite(curr)) {
           // for NaN or infinite numeric values, skip to final value
-          tuple.set(item, key, next, stamp);
+          tuple.set(item, key, next);
         } else {
           // otherwise lookup interpolator
           interp = d3.interpolate(curr, next);
@@ -8603,7 +8843,7 @@ define('core/View',['require','exports','module','d3','../dataflow/Node','../par
       this._model.width(this._width);
       this._model.height(this._height);
       if (this._el) this.initialize(this._el.parentNode);
-      this.update({props:"enter"}).update({props:"update"});
+      this.update();
     } else {
       this.padding(pad).update(opt);
     }
@@ -8683,6 +8923,7 @@ define('core/View',['require','exports','module','d3','../dataflow/Node','../par
 
     var cs = changeset.create();
     if(trans) cs.trans = trans;
+    if(opt.reflow !== undefined) cs.reflow = opt.reflow
 
     if(!v._build) {
       v._renderNode = new Node(v._model.graph)
@@ -8697,6 +8938,12 @@ define('core/View',['require','exports','module','d3','../dataflow/Node','../par
         } else {
           v._renderer.render(s);
         }
+
+        // For all updated datasources, finalize their changesets.
+        for(var ds in input.data) {
+          changeset.finalize(v._model.data(ds).last());
+        }
+
         return input;
       };
 
