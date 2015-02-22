@@ -1,7 +1,7 @@
 var ved = {
   version: 0.1,
   data: undefined,
-  renderType: "canvas"
+  renderType: "svg"
 };
 
 ved.params = function() {
@@ -73,8 +73,8 @@ ved.resize = function(event) {
 ved.init = function() {
   // Set base directory
   vg.config.baseURL = "../";
-  
-  // Specification drop-down menu               
+
+  // Specification drop-down menu
   var sel = d3.select("#sel_spec");
   sel.on("change", ved.select);
   sel.append("option").text("Custom");
@@ -101,7 +101,7 @@ ved.init = function() {
   var ren = d3.select("#sel_render");
   ren.on("change", ved.renderer)
   ren.selectAll("option")
-    .data(["Canvas", "SVG"])
+    .data(["SVG","Canvas"])
    .enter().append("option")
     .attr("value", function(d) { return d.toLowerCase(); })
     .text(function(d) { return d; });
@@ -111,7 +111,7 @@ ved.init = function() {
   d3.select("#btn_spec_parse").on("click", ved.parse);
   d3.select(window).on("resize", ved.resize);
   ved.resize();
-  
+
   // Handle application parameters
   var p = ved.params();
   if (p.spec) {

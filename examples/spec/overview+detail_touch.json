@@ -6,30 +6,9 @@
       "name": "twotouchmove",
       "init": "[]",
       "streams": [
-        {"type": "touchmove[e.touches.length==2]", "expr":"[{x: p.x-e.changedTouches[0].clientX + e.touches[0].clientX, y: p.y-e.changedTouches[0].clientY + e.touches[0].clientY},{x: p.x-e.changedTouches[0].clientX + e.touches[1].clientX, y: p.y-e.changedTouches[0].clientY + e.touches[1].clientY}]"}
+        {"type": "touchmove[e.touches.length==2]", "expr":"[{x: p.x-e.changedTouches[0].clientX + e.touches[0].clientX, y: p.y-e.changedTouches[0].clientY + e.touches[0].clientY},{x: p.x-e.changedTouches[0].clientX + e.touches[1].clientX, y: p.y-e.changedTouches[0].clientY + e.touches[1].clientY}]"},
+        {"type": "dblclick", "expr": "dragging1"}
       ]
-    },
-    {
-      "name": "twotouchend",
-      "init": "null",
-      "streams": [
-        {"type": "touchmove[e.touches.length!=2]", "expr":"null"},
-        {"type": "touchstart[e.touches.length!=2]", "expr":"null"},
-        {"type": "touchend[e.touches.length!=2]", "expr":"null"}
-      ]
-    },
-    {
-      "name": "draggingBoth",
-      "init": "false",
-      "streams": [
-        {"type": "touchstart, touchend", "expr": "false"},
-        {"type": ".box:touchstart","scale":"xContext","invert":true,"expr": "p.x"}
-      ]
-    },
-    {
-      "name": "draggingBothDelta",
-      "init": 0,
-      "streams": [{"type": "draggingBoth", "expr": "draggingBoth"}]
     },
     {
       "name": "dragging1",
@@ -50,22 +29,20 @@
     {
       "name": "touchevent",
       "init": "false",
-      "streams": [
-        {"type": "touchmove,touchstart,touchend","expr": "true"},
-        {"type": "mousedown, mouseup", "expr": "false"}
-      ]
+      "streams": [{"type":"touchstart", "expr":"true"},
+                  {"type":"mousedown,mouseup", "expr":"false"}]
     },
     {
       "name": "brush_start",
       "streams": [
         {
-          "type": "twotouchmove", "expr": "twotouchmove[0].x", "scale": "xContext", "invert": true
-        },
-        {
           "type": "mousedown,touchstart[!dragging2][i.class!='box'],touchmove[dragging1]",
-          "expr": "p.x",
+          "expr": "console.log('evaling this'),p.x",
           "scale": "xContext",
           "invert": true
+        },
+        {
+          "type": "twotouchmove", "expr": "twotouchmove[0].x", "scale": "xContext", "invert": true
         }
       ]
     },

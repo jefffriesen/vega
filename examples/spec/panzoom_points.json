@@ -12,19 +12,34 @@
 
   "signals": [
     {
+      "name": "onetouch",
+      "init": {"from0":false,"t":0,"active":false},
+      "streams": [
+        {"type":"touchmove,touchstart,touchend", "expr": "onetouch.active=e.touches.length==1,onetouch.from0=onetouch.active&&(onetouch.from0||onetouch.t==0),onetouch.t=e.touches.length,onetouch"}
+      ]
+    },
+    {
+      "name": "twotouchmove",
+      "init": [],
+      "streams": [
+        {"type": "touchmove[e.touches.length==2]", "expr":"[{x: p.x-e.changedTouches[0].clientX + e.touches[0].clientX, y: p.y-e.changedTouches[0].clientY + e.touches[0].clientY},{x: p.x-e.changedTouches[0].clientX + e.touches[1].clientX, y: p.y-e.changedTouches[0].clientY + e.touches[1].clientY}]"},
+        {"type": "dblclick", "expr": "dragging1"}
+      ]
+    },
+    {
       "name": "zoomCenterX",
       "init": 0,
       "streams": [
-        {"type": "mousemove", "expr": "p"},
-        {"type": "touchmove[e.touches.length==2]", "expr": "(e.touches[0].pageX + e.touches[1].pageX) / 2"}
+        {"type": "mousemove", "expr": "p.x", "scale":"x", "invert":true},
+        {"type": "twotouchmove", "expr": "(twotouchmove[0].x + twotouchmove[1].x)/2", "scale":"x", "invert":true}
       ]
     },
     {
       "name": "zoomCenterY",
       "init": 0,
       "streams": [
-        {"type": "mousemove", "expr": "p"},
-        {"type": "touchmove[e.touches.length==2]", "expr": "(e.touches[0].pageY + e.touches[1].pageY) / 2"}
+        {"type": "mousemove", "expr": "p.y", "scale":"y", "invert":true},
+        {"type": "twotouchmove", "expr": "(twotouchmove[0].y + twotouchmove[1].y)/2", "scale":"y", "invert":true}
       ]
     },
     {
@@ -32,7 +47,7 @@
       "init": 0,
       "streams": [
         {"type": "mousedown,touchstart", "expr": "0"},
-        {"type": "[mousedown, mouseup] > mousemove,touchmove[e.touches.length==1]", "expr": "xCoord - p.x"}
+        {"type": "[mousedown, mouseup] > mousemove,touchmove[onetouch.from0]", "expr": "xCoord - p.x"}
       ]
     },
     {
@@ -48,7 +63,7 @@
       "init": 0,
       "streams": [
         {"type": "mousedown,touchstart", "expr": "0"},
-        {"type": "[mousedown, mouseup] > mousemove,touchmove[e.touches.length==1]", "expr": "p.y - yCoord"}
+        {"type": "[mousedown, mouseup] > mousemove,touchmove[onetouch.from0]", "expr": "p.y - yCoord"}
       ]
     },
     {
@@ -136,6 +151,16 @@
         }
       },
       "marks": [
+        {
+          "type": "symbol",
+          "properties": {
+            "update": {
+              "x": {"scale":"x","signal":"zoomCenterX"},
+              "y": {"scale":"y","signal":"zoomCenterY"},
+              "fill": {"value": "black"}
+            }
+          }
+        },
         {
           "type": "symbol",
           "from": {"data": "points"},

@@ -31,13 +31,18 @@
         {"type": "brush_end", "expr": "date(brush_end)"}
       ]
     },
-    {"name": "min_date", "expr": "min(date_start, date_end)"},
+    {"name": "min_date",
+      "streams":[
+        {"type":"date_start, date_end", "expr": "console.log('reval'),min(date_start, date_end)"},
+        {"type": "dblclick", "expr":"date_start, null"}
+      ]
+    },
     {"name": "max_date", "expr": "max(date_start, date_end)"}
   ],
 
   "data": [
     {
-      "name": "sp500", 
+      "name": "sp500",
       "url": "data/sp500.csv",
       "format": {"type": "csv", "parse": {"price": "number", "date": "date"}}
     },
@@ -46,7 +51,7 @@
       "source": "sp500",
       "transform": [
         {
-          "type": "filter", 
+          "type": "filter",
           "test": "min_date == max_date || min(date_start, date_end) <= d.date && d.date <= max(date_start, date_end)"
         },
         {"type": "sort", "by": "date"}

@@ -7059,12 +7059,16 @@ define('parse/streams',['require','exports','module','d3','../dataflow/Node','..
     function signal(sig, selector, exp, spec) {
       var n = new Node(graph);
       n.evaluate = function(input) {
+        if(!input.signals[selector.signal]) {
+          return graph.doNotPropagate;
+        }
+
         var val = expr.eval(graph, exp.fn, null, null, null, null, exp.signals);
         if(spec.scale) val = model.scale(spec, val);
         sig.value(val);
         input.signals[sig.name()] = 1;
         input.reflow = true;
-        return input;  
+        return input;
       };
       n.dependency(C.SIGNALS, selector.signal);
       n.addListener(sig);
@@ -7090,7 +7094,7 @@ define('parse/streams',['require','exports','module','d3','../dataflow/Node','..
     };
 
     function orderedStream(sig, selector, exp, spec) {
-      var name = sig.name(), 
+      var name = sig.name(),
           trueFn = expr(graph, "true"),
           s = {};
 
@@ -7152,11 +7156,11 @@ define('parse/streams',['require','exports','module','d3','../dataflow/Node','..
 
     // We register the event listeners all together so that if multiple
     // signals are registered on the same event, they will receive the
-    // new value on the same pulse. 
+    // new value on the same pulse.
 
     // TODO: Filters, time intervals, target selectors
     util.keys(register).forEach(function(r) {
-      var handlers = register[r], 
+      var handlers = register[r],
           node = nodes[r];
 
       view.on(r, function(evt, item) {
@@ -7178,8 +7182,8 @@ define('parse/streams',['require','exports','module','d3','../dataflow/Node','..
             return !expr.eval(graph, f.fn, d, evt, item, p, f.signals);
           });
           if(filtered) continue;
-          
-          val = expr.eval(graph, h.exp.fn, d, evt, item, p, h.exp.signals); 
+
+          val = expr.eval(graph, h.exp.fn, d, evt, item, p, h.exp.signals);
           if(h.spec.scale) val = model.scale(h.spec, val);
           h.signal.value(val);
           cs.signals[h.signal.name()] = 1;
@@ -7189,7 +7193,8 @@ define('parse/streams',['require','exports','module','d3','../dataflow/Node','..
       });
     })
   };
-});
+})
+;
 define('render/canvas/marks',['require','exports','module','../../core/Bounds','../../util/bounds','../../util/index','../../util/config','./path'],function(require, module, exports) {
   var Bounds = require('../../core/Bounds'),
       boundsCalc = require('../../util/bounds'),
