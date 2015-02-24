@@ -8,7 +8,7 @@
       "init": {"x":0, "y":0},
       "streams":[
         {
-          "type": ".draggable:mousedown",
+          "type": ".draggable:mousedown,.draggable:touchstart",
           "expr": "{x:p.x-i.x, y:p.y-i.y}"
         }
       ]
@@ -18,7 +18,7 @@
       "init": {"x":10, "y":10},
       "streams": [
         {
-          "type": "[.draggable:mousedown,mouseup]>mousemove",
+          "type": "[.draggable:mousedown,mouseup]>mousemove,[.draggable:touchstart,touchend]>touchmove",
           "expr": "({x:p.x-dragStart.x, y:p.y-dragStart.y})"
         }
       ]
@@ -28,11 +28,11 @@
       "init": {"x":0, "y": 0},
       "streams": [
         {
-          "type": "[.draggable:mousedown,mouseup]>.point:mouseover",
+          "type": "[.draggable:mousedown,mouseup]>.point:mouseover,[.draggable:touchstart,touchend]>.point:touchmove",
           "expr": "i"
         },
         {
-          "type": "mouseup",
+          "type": "mouseup,touchend",
           "expr": "({x:0,y:0})"
         }
       ]
@@ -41,7 +41,7 @@
       "name": "handleDragStart",
       "init": {"x":0, "y":0},
       "streams":[{
-        "type":".handleBR:mousedown",
+        "type":".handleBR:mousedown,.handleBR:touchstart",
         "expr":"({x:i.x-handleDrag.width, y:i.y-handleDrag.height})"
       }]
     },
@@ -49,24 +49,24 @@
       "name": "handleDrag",
       "init": {"width":10, "height":10},
       "streams":[{
-        "type":"[.handleBR:mousedown,mouseup]>mousemove",
+        "type":"[.handleBR:mousedown,mouseup]>mousemove,[.handleBR:touchstart,touchend]>touchmove",
         "expr": "({width:p.x-handleDragStart.x, height:p.y-handleDragStart.y})"
       }]
     },
     {
       "name":"handleTopLeft",
       "init": {},
-      "streams":[{"type":".point:click", "expr":"i"}]
+      "streams":[{"type":".point:click,.point:touchend", "expr":"i"}]
     },
     {
       "name": "handleBottomRight",
       "init": {},
       "streams":[
         {
-          "type":".point:click",
+          "type":".point:click,.point:touchend",
           "expr":"({x:i.x+handleDrag.width,y:i.y+handleDrag.height})"},
         {
-          "type": "[.handleBR:mousedown,mouseup]>mousemove",
+          "type": "[.handleBR:mousedown,mouseup]>mousemove,[.handleBR:touchstart,touchend]>touchmove",
           "expr": "p"
         }
       ]
