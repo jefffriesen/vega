@@ -42,32 +42,25 @@
       ]
     },
     {
-      "name": "ttm_screen",
-      "init": [],
-      "streams": [
-        {"type": "touchmove[e.touches.length==2],touchstart[e.touches.length==2],touchend[e.touches.length==2]", "expr":"[{x: e.touches[0].clientX, y: e.touches[0].clientY},{x: e.touches[1].clientX, y: e.touches[1].clientY}]"}
-      ]
-    },
-    {
       "name": "pinchZoomDelta",
       "init": 0,
       "streams": [
         {"type":"twotouchstart", "expr": "0"},
-        {"type":"ttm_screen", "expr":"sqrt(pow(ttm_screen[0].x-ttm_screen[1].x,2) + pow(ttm_screen[0].y-ttm_screen[1].y,2))-pinchZoomDist"}
+        {"type":"twotouchmove", "expr":"sqrt(pow(twotouchmove[0].x-twotouchmove[1].x,2) + pow(twotouchmove[0].y-twotouchmove[1].y,2))-pinchZoomDist"}
       ]
     },
     {
       "name": "pinchZoomDist",
       "init": 0,
       "streams": [
-        {"type":"ttm_screen", "expr":"sqrt(pow(ttm_screen[0].x-ttm_screen[1].x,2) + pow(ttm_screen[0].y-ttm_screen[1].y,2))"}
+        {"type":"twotouchmove", "expr":"sqrt(pow(twotouchmove[0].x-twotouchmove[1].x,2) + pow(twotouchmove[0].y-twotouchmove[1].y,2))"}
       ]
     },
     {
       "name": "pinchZoomFactor",
       "init": 1,
       "streams": [
-        {"type":"ttm_screen", "expr":"(pinchZoomDist-pinchZoomDelta)/pinchZoomDist"},
+        {"type":"twotouchmove", "expr":"(pinchZoomDist-pinchZoomDelta)/pinchZoomDist"},
         {"type":"twotouchstart", "expr":"1"}
       ]
     },
@@ -75,7 +68,7 @@
       "name": "xDelta",
       "init": 0,
       "streams": [
-        {"type": "ttm_screen", "expr":"xCoord - (ttm_screen[0].x + ttm_screen[1].x)/2"},
+        {"type": "twotouchmove", "expr":"xCoord - (twotouchmove[0].x + twotouchmove[1].x)/2"},
         {"type": "mousedown,touchstart, twotouchstart", "expr": "0"},
         {"type": "[mousedown, mouseup] > mousemove,touchmove[onetouch.from0]", "expr": "xCoord - p.x"}
       ]
@@ -86,14 +79,14 @@
       "streams": [
         {"type": "mousedown,touchstart", "expr": "p.x"},
         {"type": "[mousedown, mouseup] > mousemove,touchmove[onetouch.from0]", "expr": "p.x"},
-        {"type": "ttm_screen", "expr":"(ttm_screen[0].x + ttm_screen[1].x)/2"}
+        {"type": "twotouchmove", "expr":"(twotouchmove[0].x + twotouchmove[1].x)/2"}
       ]
     },
     {
       "name": "yDelta",
       "init": 0,
       "streams": [
-        {"type": "ttm_screen", "expr":"(ttm_screen[0].y + ttm_screen[1].y)/2 - yCoord"},
+        {"type": "twotouchmove", "expr":"(twotouchmove[0].y + twotouchmove[1].y)/2 - yCoord"},
         {"type": "mousedown,touchstart,twotouchstart", "expr": "0"},
         {"type": "[mousedown, mouseup] > mousemove,touchmove[onetouch.from0]", "expr": "p.y - yCoord"}
       ]
@@ -104,7 +97,7 @@
       "streams": [
         {"type": "mousedown,touchstart", "expr": "p.y"},
         {"type": "[mousedown, mouseup] > mousemove,touchmove[onetouch.from0]", "expr": "p.y"},
-        {"type": "ttm_screen", "expr":"(ttm_screen[0].y + ttm_screen[1].y)/2"}
+        {"type": "twotouchmove", "expr":"(twotouchmove[0].y + twotouchmove[1].y)/2"}
       ]
     },
     {
@@ -157,6 +150,13 @@
       "streams": [
         {"type": "mousemove", "expr": "p.y", "scale":"y", "invert":true},
         {"type": "twotouchmove", "expr": "(twotouchmove[0].y + twotouchmove[1].y)/2", "scale":"y", "invert":true}
+      ]
+    },
+    {
+      "name": "pointSize",
+      "init": 30,
+      "streams": [
+        {"type": "xMin", "expr": "min(max(60/(xMax-xMin), 30),100)"}
       ]
     }
   ],
@@ -221,7 +221,8 @@
             "update": {
               "x": {"scale": "x", "field": "x"},
               "y": {"scale": "y", "field": "y"},
-              "fill": {"value": "steelblue"}
+              "fill": {"value": "steelblue"},
+              "size": {"signal": "pointSize"}
             }
           }
         }
