@@ -7,13 +7,13 @@
       "name": "clickedPt",
       "init": 0,
       "streams": [{"type": "click", "expr": "d._id"},
-                  {"type": "touchend", "expr": "e.preventDefault(),d._id"}]
+                  {"type": "touchend", "expr": "d._id"}]
     },
     {
-      "name": "shift",
+      "name": "preventClear",
       "init": false,
       "streams": [{"type": "click", "expr": "e.shiftKey"},
-                  {"type": "touchend", "expr": "e.preventDefault(),i.class=='point'"}]
+                  {"type": "touchend", "expr": "i.class=='point'"}]
     }
   ],
 
@@ -21,7 +21,7 @@
     {
       "name": "clearPts",
       "type": "==",
-      "operands": [{"signal": "shift"}, {"value": false}]
+      "operands": [{"signal": "preventClear"}, {"value": false}]
     },
     {
       "name": "isSelected",
