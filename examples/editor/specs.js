@@ -19,5 +19,6 @@ var INTERACTIVE_SPECS = [
   "panzoom_touch",
   "overview+detail",
   "overview+detail_touch",
-  "handles"
+  "handles",
+  "dimpvis_inspired"
 ];

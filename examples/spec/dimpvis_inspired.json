@@ -1,0 +1,191 @@
+{
+  "width": 800,
+  "height": 600,
+
+  "data": [
+  {
+    "name": "countries",
+    "url": "data/countries.json"
+  },
+  {
+    "name": "countries_year",
+    "url": "data/countries.json",
+    "transform": [
+      {
+        "type": "filter",
+        "test": "d.year == year"
+      }
+    ]
+  },
+  {
+    "name": "country_timeline",
+    "url": "data/countries.json",
+    "transform": [
+      {
+        "type": "filter",
+        "test": "d.country == clickedCountry"
+      },
+      {
+        "type": "sort",
+        "by": "year"
+      }
+    ]
+  },
+  {
+  "name": "selectedPts",
+    "modify": [
+      {
+        "type": "clear",
+        "predicate": "clearPts"
+      },
+      {
+        "type": "toggle",
+        "signal": "clickedPt",
+        "field": "id"
+      }
+    ]
+  }],
+
+  "signals": [
+    {
+      "name": "year",
+      "init": 1955
+    },
+    {
+      "name": "clickedPt",
+      "init": 0,
+      "streams": [{"type": "click", "expr": "d._id"},
+                  {"type": "touchend", "expr": "d._id"}]
+    },
+    {
+      "name": "clickedCountry",
+      "init": "",
+      "streams": [{"type": "click", "expr": "d.country"},
+                  {"type": "touchend", "expr": "d.country"}]
+    },
+    {
+      "name": "preventClear",
+      "init": false,
+      "streams": [{"type": "click", "expr": "e.shiftKey"},
+                  {"type": "touchend", "expr": "i.class=='point'"}]
+    }
+  ],
+  "predicates": [
+   {
+      "name": "clearPts",
+      "type": "==",
+      "operands": [{"signal": "preventClear"}, {"value": false}]
+    },
+    {
+      "name": "isSelected",
+      "type": "in",
+      "item": {"arg": "id"},
+      "data": "selectedPts",
+      "field": "id"
+    }
+  ],
+
+  "scales": [
+    {
+      "name": "x",
+      "range": "width", "zero": false,
+      "domain": {"data": "countries", "field": "fertility"}
+    },
+    {
+      "name": "y",
+      "range": "height",
+      "nice": true, "zero": false,
+      "domain": {"data": "countries", "field": "life_expect"}
+    }
+  ],
+
+  "axes": [
+    {"type": "x", "scale": "x", "offset": 5, "ticks": 5, "title": "Fertility"},
+    {"type": "y", "scale": "y", "offset": 5, "ticks": 5, "title": "Life Expectancy"}
+  ],
+
+  "marks": [
+    {
+      "type": "symbol",
+      "from": {"data": "countries_year"},
+      "properties": {
+        "enter": {
+          "x": {"scale": "x", "field": "fertility"},
+          "y": {"scale": "y", "field": "life_expect"},
+          "fill": {"value": "steelblue"},
+          "fillOpacity": {"value": 0.5},
+          "size": {"value": 100}
+        },
+        "update": {
+          "fillOpacity": {
+           "rule": [
+              {
+                "predicate": "isSelected",
+                "input": {
+                  "id": {"field": "_id"}
+                },
+                "value": 1
+              },
+              {"value": 0.5}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "country_timeline"},
+      "properties": {
+        "enter": {
+          "x": {"scale": "x", "field": "fertility"},
+          "y": {"scale": "y", "field": "life_expect"},
+          "fill": {"value": "grey"},
+          "fillOpacity": {"value": 0.5},
+          "size": {"value": 100},
+          "text": {"field": "year"}
+        }
+      }
+    },
+    {
+      "type": "line",
+      "from": {"data": "country_timeline"},
+      "properties": {
+        "update": {
+          "x": {"scale": "x", "field": "fertility"},
+          "y": {"scale": "y", "field": "life_expect"},
+          "stroke": {"value": "grey"},
+          "strokeOpacity": {"value": 0.5},
+          "size": {"value": 100}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data":"countries_year"},
+      "properties": {
+        "enter": {
+          "x": {"scale": "x", "field": "fertility", "offset": 8},
+          "y": {"scale": "y", "field": "life_expect", "offset": 4},
+          "fill": {"value": "black"},
+          "fillOpacity": {"value": 0.25},
+          "size": {"value": 100},
+          "text": {"field": "country"}
+        },
+        "update": {
+          "fillOpacity": {
+           "rule": [
+              {
+                "predicate": "isSelected",
+                "input": {
+                  "id": {"field": "_id"}
+                },
+                "value": 0.5
+              },
+              {"value": 0}
+            ]
+          }
+        }
+      }
+    }
+  ]
+}
