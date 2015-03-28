@@ -14,6 +14,16 @@
       {
         "type": "filter",
         "test": "d.year == year"
+      },
+      {
+        "type": "formula",
+        "field": "inter_fertility",
+        "expr": "inter_year==2000?d.fertility:d.fertility+(d.n_fertility-d.fertility)*(inter_year-d.year)/5"
+      },
+      {
+        "type": "formula",
+        "field": "inter_life_expect",
+        "expr": "inter_year==2000?d.life_expect:d.life_expect+(d.n_life_expect-d.life_expect)*(inter_year-d.year)/5"
       }
     ]
   },
@@ -50,7 +60,12 @@
     {
       "name": "year",
       "init": 1955,
-      "streams":[{"type":"mousemove[dragging]", "expr":"max(1955,min(2000,5*floor((1955+(p.x-dragging)) / 5)))"}]
+      "streams":[{"type":"mousemove[dragging]", "expr":"max(1955,min(2000,5*floor((1955+(p.x-dragging)/5) / 5)))"}]
+    },
+    {
+      "name": "inter_year",
+      "init": 1955,
+      "streams":[{"type":"mousemove[dragging]", "expr":"max(1955,min(2000,1955+(p.x-dragging)/5))"}]
     },
     {
       "name": "dragging",
@@ -185,13 +200,13 @@
       "properties": {
         "enter": {
           "class": {"value": "point"},
-          "x": {"scale": "x", "field": "fertility"},
-          "y": {"scale": "y", "field": "life_expect"},
           "fill": {"value": "steelblue"},
           "fillOpacity": {"value": 0.5},
           "size": {"value": 100}
         },
         "update": {
+          "x": {"scale": "x", "field": "inter_fertility"},
+          "y": {"scale": "y", "field": "inter_life_expect"},
           "fillOpacity": {
            "rule": [
               {
