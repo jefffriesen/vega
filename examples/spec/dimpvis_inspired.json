@@ -8,6 +8,16 @@
     "url": "data/countries.json"
   },
   {
+    "name": "current_point",
+    "url": "data/countries.json",
+    "transform": [
+      {
+        "type": "filter",
+        "test": "d.year == year && d.country == clickedCountry && dragging"
+      }
+    ]
+  },
+  {
     "name": "countries_year",
     "url": "data/countries.json",
     "transform": [
@@ -58,12 +68,47 @@
 
   "signals": [
     {
-      "name": "year",
+      "name": "xMouse",
+      "init": 0,
+      "streams": [{"type":"mousemove[dragging]", "expr": "p.x", "scale":"x", "invert":true}]
+    },
+    {
+      "name": "yMouse",
+      "init": 0,
+      "streams": [{"type":"mousemove[dragging]", "expr": "p.y", "scale":"y", "invert":true}]
+    },
+    {
+      "name": "old_year",
       "init": 1955,
       "streams":[{"type":"mousemove[dragging]", "expr":"max(1955,min(2000,5*floor((1955+(p.x-dragging)/5) / 5)))"}]
     },
     {
+      "name": "currDist",
+      "init": 0,
+      "streams":[{"type":"mousemove[dragging]", "expr":"pow(xMouse-d.fertility,2)+pow(yMouse-d.life_expect,2)"}]
+    },
+    {
+      "name": "nextDist",
+      "init": 0,
+      "streams":[{"type":"mousemove[dragging]", "expr":"pow(xMouse-d.n_fertility,2)+pow(yMouse-d.n_life_expect,2) || 99999"}]
+    },
+    {
+      "name": "prevDist",
+      "init": 0,
+      "streams":[{"type":"mousemove[dragging]", "expr":"pow(xMouse-d.p_fertility,2)+pow(yMouse-d.p_life_expect,2) || 99999"}]
+    },
+    {
+      "name": "year",
+      "init": 1955,
+      "streams":[{"type":"mousemove[dragging]", "expr":"min(currDist,nextDist,prevDist)==prevDist?year-5 : min(currDist,nextDist,prevDist)==nextDist ? year+5 : year"}]
+    },
+    {
       "name": "inter_year",
+      "init": 1955,
+      "streams": [{"type":"year", "expr":"year"}]
+    },
+    {
+      "name": "old_inter_year",
       "init": 1955,
       "streams":[{"type":"mousemove[dragging]", "expr":"max(1955,min(2000,1955+(p.x-dragging)/5))"}]
     },
@@ -171,14 +216,14 @@
       "from": {"data":"countries_year"},
       "properties": {
         "enter": {
-          "x": {"scale": "x", "field": "fertility", "offset": 8},
-          "y": {"scale": "y", "field": "life_expect", "offset": 4},
           "fill": {"value": "black"},
           "fillOpacity": {"value": 0.25},
           "size": {"value": 100},
           "text": {"field": "country"}
         },
         "update": {
+          "x": {"scale": "x", "field": "inter_fertility", "offset": 8},
+          "y": {"scale": "y", "field": "inter_life_expect", "offset": 4},
           "fillOpacity": {
            "rule": [
               {
@@ -219,6 +264,21 @@
               {"value": 0.5}
             ]
           }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data":"current_point"},
+      "properties": {
+        "enter": {
+          "class": {"value":"overlay"},
+          "fill": {"value":"red"},
+          "fillOpacity": {"value": 0},
+          "x":{"value":0},
+          "y":{"value":0},
+          "width": {"value":800},
+          "height": {"value":600}
         }
       }
     }
