@@ -140,14 +140,8 @@
     {
       "name": "currentCountry",
       "init": "",
-      "streams": [{"type": ".point:mousemove[!dragging]", "expr": "d.country"},
+      "streams": [{"type": "mousemove[!dragging]", "expr": "d.country"},
                   {"type": ".point:touchmove[!dragging]", "expr": "d.country"}]
-    },
-    {
-      "name": "preventClear",
-      "init": false,
-      "streams": [{"type": "click", "expr": "e.shiftKey"},
-                  {"type": "touchend", "expr": "i.class=='point'"}]
     }
   ],
   "predicates": [
