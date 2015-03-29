@@ -26,14 +26,24 @@
         "test": "d.year == year"
       },
       {
+        "type":"formula",
+        "field": "target_fertility",
+        "expr": "inter_year>year?d.n_fertility:(d.p_fertility||d.fertility)"
+      },
+      {
+        "type":"formula",
+        "field": "target_life_expect",
+        "expr": "inter_year>year?d.n_life_expect:(d.p_life_expect||d.life_expect)"
+      },
+      {
         "type": "formula",
         "field": "inter_fertility",
-        "expr": "inter_year==2000?d.fertility:d.fertility+(d.n_fertility-d.fertility)*(inter_year-d.year)/5"
+        "expr": "inter_year==2000?d.fertility:d.fertility+(d.target_fertility-d.fertility)*abs(inter_year-d.year)/5"
       },
       {
         "type": "formula",
         "field": "inter_life_expect",
-        "expr": "inter_year==2000?d.life_expect:d.life_expect+(d.n_life_expect-d.life_expect)*(inter_year-d.year)/5"
+        "expr": "inter_year==2000?d.life_expect:d.life_expect+(d.target_life_expect-d.life_expect)*abs(inter_year-d.year)/5"
       }
     ]
   },
@@ -68,49 +78,57 @@
 
   "signals": [
     {
-      "name": "xMouse",
-      "init": 0,
-      "streams": [{"type":"mousemove[dragging]", "expr": "p.x", "scale":"x", "invert":true}]
+      "name": "pX","streams": [{"type":"mousemove[dragging]", "expr": "d.p_fertility", "scale":"x"}]
     },
     {
-      "name": "yMouse",
-      "init": 0,
-      "streams": [{"type":"mousemove[dragging]", "expr": "p.y", "scale":"y", "invert":true}]
+      "name": "nX","streams": [{"type":"mousemove[dragging]", "expr": "d.n_fertility", "scale":"x"}]
     },
     {
-      "name": "old_year",
-      "init": 1955,
-      "streams":[{"type":"mousemove[dragging]", "expr":"max(1955,min(2000,5*floor((1955+(p.x-dragging)/5) / 5)))"}]
+      "name": "cX","streams": [{"type":"mousemove[dragging]", "expr": "d.fertility", "scale":"x"}]
+    },
+    {
+      "name": "pY","streams": [{"type":"mousemove[dragging]", "expr": "d.p_life_expect", "scale":"y"}]
+    },
+    {
+      "name": "nY","streams": [{"type":"mousemove[dragging]", "expr": "d.n_life_expect", "scale":"y"}]
+    },
+    {
+      "name": "cY","streams": [{"type":"mousemove[dragging]", "expr": "d.life_expect", "scale":"y"}]
     },
     {
       "name": "currDist",
       "init": 0,
-      "streams":[{"type":"mousemove[dragging]", "expr":"pow(xMouse-d.fertility,2)+pow(yMouse-d.life_expect,2)"}]
-    },
-    {
-      "name": "nextDist",
-      "init": 0,
-      "streams":[{"type":"mousemove[dragging]", "expr":"pow(xMouse-d.n_fertility,2)+pow(yMouse-d.n_life_expect,2) || 99999"}]
+      "streams":[{"type":"mousemove[dragging]", "expr":"sqrt(pow(p.x-cX,2)+pow(p.y-cY,2))"}]
     },
     {
       "name": "prevDist",
       "init": 0,
-      "streams":[{"type":"mousemove[dragging]", "expr":"pow(xMouse-d.p_fertility,2)+pow(yMouse-d.p_life_expect,2) || 99999"}]
+      "streams":[{"type":"mousemove[dragging]", "expr":"sqrt(pow(p.x-pX,2)+pow(p.y-pY,2))"}]
     },
     {
-      "name": "year",
-      "init": 1955,
-      "streams":[{"type":"mousemove[dragging]", "expr":"min(currDist,nextDist,prevDist)==prevDist?year-5 : min(currDist,nextDist,prevDist)==nextDist ? year+5 : year"}]
+      "name": "nextDist",
+      "init": 0,
+      "streams":[{"type":"mousemove[dragging]", "expr":"sqrt(pow(p.x-nX,2)+pow(p.y-nY,2))"}]
+    },
+    {
+      "name": "prevScore",
+      "init": 0,
+      "streams": [{"type":"mousemove[dragging]", "expr":"((pX-cX)*(p.x-cX)+(pY-cY)*(p.y-cY))/prevDist||-999999"}]
+    },
+    {
+      "name": "nextScore",
+      "init": 0,
+      "streams": [{"type":"mousemove[dragging]", "expr":"((nX-cX)*(p.x-cX)+(nY-cY)*(p.y-cY))/nextDist||-999999"}]
     },
     {
       "name": "inter_year",
-      "init": 1955,
-      "streams": [{"type":"year", "expr":"year"}]
+      "init": 1980,
+      "streams": [{"type":"mousemove[dragging]", "expr":"min(2000,year+5,max(1955,year-5,prevScore>nextScore?(year-2.5*prevScore/sqrt(pow(pX-cX,2)+pow(pY-cY,2))):(year+2.5*nextScore/sqrt(pow(nX-cX,2)+pow(nY-cY,2)))))"}]
     },
     {
-      "name": "old_inter_year",
-      "init": 1955,
-      "streams":[{"type":"mousemove[dragging]", "expr":"max(1955,min(2000,1955+(p.x-dragging)/5))"}]
+      "name": "year",
+      "init": 1980,
+      "streams":[{"type":"mousemove[dragging]", "expr":"min(2000,max(1955,prevScore>nextScore?(currDist<prevDist?year:year-5):(currDist<nextDist?year:year+5)))"}]
     },
     {
       "name": "dragging",
