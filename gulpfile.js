@@ -2,21 +2,24 @@ var gulp = require('gulp'),
     browserify = require('browserify'),
     buffer = require('vinyl-buffer'),
     rename = require('gulp-rename'),
+    exorcist   = require('exorcist'),
+    transform = require('vinyl-transform'),
     source = require('vinyl-source-stream'),
     sourcemaps = require('gulp-sourcemaps'),
     uglify = require('gulp-uglify'),
     watchify = require('watchify'),
     gutil = require('gulp-util'),
-    mocha = require('gulp-spawn-mocha');
+    mocha = require('gulp-spawn-mocha'),
+    argv = require('yargs').argv;
 
 function browser() {
   return browserify({
-      entries: ['./src/'],
+      entries: ['./index'],
       standalone: 'vg',
       debug: true,
       cache: {}, packageCache: {}
     })
-    .external(['d3', 'topojson']); 
+    .external(['d3', 'topojson', 'canvas']); 
 }
 
 function watcher() {
@@ -29,12 +32,12 @@ function build(b) {
     .on('error', gutil.log.bind(gutil, 'Browserify Error'))
     .pipe(source('vega2.js'))
     .pipe(buffer())
+    // Remove map from vega.js
+    .pipe(transform(function () { return exorcist('./vega2.js.map'); }))
     .pipe(gulp.dest('.'))
-    .pipe(sourcemaps.init({loadMaps: true}))
     // This will minify and rename to vegalite.min.js
     .pipe(uglify())
     .pipe(rename({ extname: '.min.js' }))
-    .pipe(sourcemaps.write('./'))
     .pipe(gulp.dest('.')); 
 }
 
@@ -51,7 +54,7 @@ gulp.task('watch', function() {
 
 gulp.task('test', function() {
   return gulp.src(['test/**/*.js'], { read: false })
-    .pipe(mocha())
+    .pipe(mocha({ grep: argv.g, timeout: 5000 }))
     .on('error', gutil.log);
 });
 

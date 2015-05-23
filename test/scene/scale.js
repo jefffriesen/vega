@@ -46,10 +46,10 @@ describe('Scale', function() {
 
         expect(x.domain()).to.eql([1, 2, 5, 6, 7]);
 
-        model.graph.signal('s1').value(3).fire();
+        model.signal('s1').value(3).fire();
         expect(x.domain()).to.eql([1, 2, 3, 6, 7]);
 
-        model.graph.signal('s2').value(6).fire();
+        model.signal('s2').value(6).fire();
         expect(x.domain()).to.eql([1, 2, 3, 6]);
 
         done();
@@ -96,10 +96,10 @@ describe('Scale', function() {
 
           expect(y.domain()).to.eql([0, 10]);
 
-          model.graph.signal('min').value(5).fire();
+          model.signal('min').value(5).fire();
           expect(y.domain()).to.eql([5, 10]);
 
-          model.graph.signal('max').value(15).fire();
+          model.signal('max').value(15).fire();
           expect(y.domain()).to.eql([5, 15]);
 
           done();
@@ -172,7 +172,7 @@ describe('Scale', function() {
                 ord = [],
                 i = 1, len = 20;
 
-            for(; i<=len; ++i) ord.push(i+"");
+            for(; i<=len; ++i) ord.push(i);
 
             expect(x.domain()).to.have.members(ord);
             expect(y.domain()).to.eql([15, 91]);
@@ -183,7 +183,7 @@ describe('Scale', function() {
 
         it('should handle streaming adds', function(done) {
           parseSpec(spec, function(model) {
-            model.data('table').add([
+            model.data('table').insert([
               {"x": 21, "y": 100}, {"x": 22, "y": 10},
               {"x": 23, "y": 53}
             ]).fire();
@@ -194,7 +194,7 @@ describe('Scale', function() {
                 ord = [],
                 i = 1, len = 23;
 
-            for(; i<=len; ++i) ord.push(i+"");
+            for(; i<=len; ++i) ord.push(i);
 
             expect(x.domain()).to.have.members(ord);
             expect(y.domain()).to.eql([10, 100]);
@@ -220,7 +220,7 @@ describe('Scale', function() {
 
             for(; i<=len; ++i) {
               v = i%2 ? i*2 : i;
-              if(ord.indexOf(v+"") === -1) ord.push(v+"");
+              if(ord.indexOf(v) === -1) ord.push(v);
             }
 
             expect(x.domain()).to.have.members(ord);
@@ -242,7 +242,7 @@ describe('Scale', function() {
                 ord = [],
                 i = 1, len = 10;
 
-            for(; i<=len; ++i) ord.push(i+"");
+            for(; i<=len; ++i) ord.push(i);
 
             expect(x.domain()).to.have.members(ord);
             expect(y.domain()).to.eql([19, 91]);
@@ -303,7 +303,7 @@ describe('Scale', function() {
                 ord = [],
                 i = 0, len = 20;
 
-            for(; i<len; ++i) ord.push((i+1)+"");
+            for(; i<len; ++i) ord.push((i+1));
 
             expect(x.domain()).to.have.members(ord);
             expect(y.domain()).to.eql([15, 91]);
@@ -320,25 +320,25 @@ describe('Scale', function() {
                 ord = [],
                 i = 0, len = 20;
 
-            for(; i<len; ++i) ord.push((i+1)+"");
+            for(; i<len; ++i) ord.push((i+1));
 
             expect(x.domain()).to.have.members(ord);
             expect(y.domain()).to.eql([15, 91]);
 
-            model.data('table1').add([
+            model.data('table1').insert([
               {"x": 21, "y": 100}, {"x": 22, "y": 10},
               {"x": 23, "y": 53}
             ]).fire();
-            ord.push("21", "22", "23");
+            ord.push(21, 22, 23);
 
             expect(x.domain()).to.have.members(ord);
             expect(y.domain()).to.eql([10, 100]);
 
-            model.data('table2').add([
+            model.data('table2').insert([
               {"a": 24, "b": 500}, {"a": 25, "b": 1},
               {"a": 26, "b": 523}
             ]).fire();
-            ord.push("24", "25", "26");
+            ord.push(24, 25, 26);
 
             expect(x.domain()).to.have.members(ord);
             expect(y.domain()).to.eql([1, 523]);
@@ -371,7 +371,7 @@ describe('Scale', function() {
 
             for(; i<=len; ++i) {
               v = i%2 ? i*2 : i;
-              if(ord.indexOf(v+"") === -1) ord.push(v+"");
+              if(ord.indexOf(v) === -1) ord.push(v);
             }
 
             expect(x.domain()).to.have.members(ord);
@@ -397,7 +397,7 @@ describe('Scale', function() {
                 ord = [],
                 i = 1, len = 10;
 
-            for(; i<=len; ++i) ord.push(i+"");
+            for(; i<=len; ++i) ord.push(i);
 
             expect(x.domain()).to.have.members(ord);
             expect(y.domain()).to.eql([19, 91]);
@@ -432,7 +432,7 @@ describe('Scale', function() {
               {"category":"C", "position":10, "value":0.2},
               {"category":"C", "position":11, "value":0.7}
             ],
-            "transform": [{"type": "facet", "keys": ["category"] }]
+            "transform": [{"type": "facet", "groupby": ["category"] }]
           }],
 
           "marks": [{
@@ -456,7 +456,7 @@ describe('Scale', function() {
 
             for(; i<len; ++i) {
               pos = groups[i].scale('pos');
-              ord = [num*i, num*i+1, num*i+2, num*i+3].map(function(v) { return v+"" });
+              ord = [num*i, num*i+1, num*i+2, num*i+3].map(function(v) { return v });
               expect(pos.domain()).to.have.members(ord);
             }
 
@@ -467,7 +467,7 @@ describe('Scale', function() {
         it('should handle streaming adds', function(done) {
           parseSpec(spec, function(model) {
             model.data('table')
-              .add([
+              .insert([
                 {"category": "A", "position": 4},
                 {"category": "B", "position": 8},
                 {"category": "C", "position": 12}
@@ -481,7 +481,7 @@ describe('Scale', function() {
 
             for(; i<len; ++i) {
               pos = groups[i].scale('pos');
-              ord = [num*i, num*i+1, num*i+2, num*i+3, num*i+4].map(function(v) { return v+"" });
+              ord = [num*i, num*i+1, num*i+2, num*i+3, num*i+4].map(function(v) { return v });
               expect(pos.domain()).to.have.members(ord);
             }
 
@@ -503,7 +503,7 @@ describe('Scale', function() {
 
             for(; i<len; ++i) {
               pos = groups[i].scale('pos');
-              ord = [(num*i)*2, (num*i+1)*2, (num*i+2)*2, (num*i+3)*2].map(function(v) { return v+"" });
+              ord = [(num*i)*2, (num*i+1)*2, (num*i+2)*2, (num*i+3)*2].map(function(v) { return v });
               expect(pos.domain()).to.have.members(ord);
             }
 
@@ -524,7 +524,7 @@ describe('Scale', function() {
 
             for(; i<len; ++i) {
               pos = groups[i].scale('pos');
-              expect(pos.domain()).to.have.members([num*i+1, num*i+3].map(function(v) { return v+""}));
+              expect(pos.domain()).to.have.members([num*i+1, num*i+3].map(function(v) { return v}));
             }
 
             done();
@@ -585,11 +585,11 @@ describe('Scale', function() {
         expect(x.range()).to.eql([5, 23, 7, 51]);
         expect(y.range()).to.eql([5, 23, 7, 51]);
 
-        model.graph.signal('s1').value(10).fire();
+        model.signal('s1').value(10).fire();
         expect(x.range()).to.eql([10, 23, 7, 51]);
         expect(y.range()).to.eql([10, 23, 7, 51]);
 
-        model.graph.signal('s2').value(37).fire();
+        model.signal('s2').value(37).fire();
         expect(x.range()).to.eql([10, 23, 37, 51]);
         expect(y.range()).to.eql([10, 23, 37, 51]);
 
@@ -768,12 +768,12 @@ describe('Scale', function() {
           expect(x.rangeExtent()).to.eql(range);
           expect(y.range()).to.eql(range);
 
-          model.graph.signal('min').value(27).fire();
+          model.signal('min').value(27).fire();
           expect(x.rangeBand()).to.eql(~~((range[1]-27)/2));
           expect(x.rangeExtent()).to.eql([27, range[1]]);
           expect(y.range()).to.eql([27, range[1]]);
 
-          model.graph.signal('max').value(47).fire();
+          model.signal('max').value(47).fire();
           expect(x.rangeBand()).to.eql(10);
           expect(x.rangeExtent()).to.eql([27, 47]);
           expect(y.range()).to.eql([27, 47]);

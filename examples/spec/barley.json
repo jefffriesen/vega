@@ -12,10 +12,10 @@
       "transform": [
         {
           "type": "aggregate",
-          "fields": [{"name": "yield", "ops": ["median"]}],
-          "group_by": ["variety"]
+          "groupby": ["variety"],
+          "summarize": [{"name": "yield", "ops": ["median"]}]
         },
-        {"type": "sort", "by": "-yield_median"}
+        {"type": "sort", "by": "-median_yield"}
       ]
     },
     {
@@ -24,10 +24,10 @@
       "transform": [
         {
           "type": "aggregate",
-          "fields": [{"name": "yield", "ops": ["median"]}],
-          "group_by": ["site"]
+          "groupby": ["site"],
+          "summarize": [{"name": "yield", "ops": ["median"]}]
         },
-        {"type": "sort", "by": "-yield_median"}
+        {"type": "sort", "by": "-median_yield"}
       ]
     }
   ],
@@ -62,7 +62,7 @@
       "from": {"data": "site"},
       "properties": {
         "enter": {
-          "x": {"group": "width", "mult": 0.5},
+          "x": {"field": {"group": "width"}, "mult": 0.5},
           "y": {"scale": "g", "field": "site", "offset": -2},
           "fontWeight": {"value": "bold"},
           "text": {"field": "site"},
@@ -76,7 +76,7 @@
       "type": "group",
       "from": {
         "data": "barley",
-        "transform": [{"type": "facet", "keys": ["site"]}]
+        "transform": [{"type": "facet", "groupby": ["site"]}]
       },
       "scales": [
         {
@@ -101,7 +101,7 @@
           "x": {"value": 0.5},
           "y": {"scale": "g", "field": "key"},
           "height": {"scale": "g", "band": true},
-          "width": {"group": "width"},
+          "width": {"field": {"group": "width"}},
           "stroke": {"value": "#ccc"}
         }
       },

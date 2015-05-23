@@ -1,5 +1,5 @@
 var d3 = require('d3'),
-    Bounds = require('../../core/Bounds');
+    Bounds = require('../../util/Bounds');
 
 // Path parsing and rendering code taken from fabric.js -- Thanks!
 var cmdLength = { m:2, l:2, h:1, v:1, c:6, s:4, q:4, t:2, a:7 },
@@ -710,10 +710,20 @@ function bounds(path, bounds) {
 
 function area(items) {
   var o = items[0];
-  var area = d3.svg.area()
-    .x(function(d) { return d.x; })
-    .y1(function(d) { return d.y; })
-    .y0(function(d) { return d.y + d.height; });
+  var area;
+  
+  if (o.orient === "horizontal") {
+    area = d3.svg.area()
+      .y(function(d) { return d.y; })
+      .x0(function(d) { return d.x; })
+      .x1(function(d) { return d.x + d.width; });
+  } else {
+    area = d3.svg.area()
+      .x(function(d) { return d.x; })
+      .y1(function(d) { return d.y; })
+      .y0(function(d) { return d.y + d.height; });
+  }
+  
   if (o.interpolate) area.interpolate(o.interpolate);
   if (o.tension != null) area.tension(o.tension);
   return area(items);

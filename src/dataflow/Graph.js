@@ -7,6 +7,11 @@ var dl = require('datalib'),
     C = require('../util/constants');
 
 function Graph() {
+}
+
+var proto = Graph.prototype;
+
+proto.init = function() {
   this._stamp = 0;
   this._rank  = 0;
 
@@ -14,14 +19,22 @@ function Graph() {
   this._signals = {};
 
   this.doNotPropagate = {};
-}
-
-var proto = Graph.prototype;
+};
 
 proto.data = function(name, pipeline, facet) {
-  if(arguments.length === 1) return this._data[name];
-  return (this._data[name] = new Datasource(this, name, facet)
-    .pipeline(pipeline));
+  var db = this._data;
+  if(!arguments.length) return dl.keys(db).map(function(d) { return db[d]; });
+  if(arguments.length === 1) return db[name];
+  return (db[name] = new Datasource(this, name, facet).pipeline(pipeline));
+};
+
+proto.dataValues = function(names) {
+  var graph = this;
+  if (!arguments.length) names = dl.keys(this._data);
+  if (!dl.isArray(names)) return this._data[names].values();
+  return names.reduce(function(db, n) {
+    return (db[n] = graph._data[n].values(), db);
+  }, {});
 };
 
 function signal(name) {
@@ -36,10 +49,11 @@ proto.signal = function(name, init) {
   return (this._signals[name] = new Signal(this, name, init));
 };
 
-proto.signalValues = function(name) {
+proto.signalValues = function(names) {
   var graph = this;
-  if(!dl.isArray(name)) return this._signals[name].value();
-  return name.reduce(function(sg, n) {
+  if(!arguments.length) names = dl.keys(this._signals);
+  if(!dl.isArray(names)) return this._signals[names].value();
+  return names.reduce(function(sg, n) {
     return (sg[n] = graph._signals[n].value(), sg);
   }, {});
 };
